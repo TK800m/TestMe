@@ -80,6 +80,18 @@ class Api(private val store: Store, private val bell: Doorbell, private val medi
                 chimeCache = System.currentTimeMillis() to on
                 json(ex, 200, JSONObject().put("ok", true))
             }
+            path == "/api/dnd" && m == "POST" -> {
+                val b = body(ex)
+                val until = when {
+                    b.optBoolean("off") -> 0L
+                    b.has("minutes") -> System.currentTimeMillis() + b.getLong("minutes") * 60_000
+                    b.has("until") -> b.getLong("until") * 1000
+                    else -> throw HttpError(400, "minutes, until of off ontbreekt")
+                }
+                bell.setDnd(until)
+                chimeCache = null
+                json(ex, 200, status())
+            }
             path == "/api/days" -> {
                 val end = Calendar.getInstance(); val start = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -90) }
                 val days = bell.client().recordingDays(dayFmt.format(start.time), dayFmt.format(end.time)).distinct().sortedDescending()
@@ -91,9 +103,15 @@ class Api(private val store: Store, private val bell: Doorbell, private val medi
                 val hidden = store.stringSet("hidden")
                 val list = c.recordingsOfDay(q["date"] ?: throw HttpError(400, "date ontbreekt"))
                     .filter { it.startTime.toString() !in hidden }.sortedByDescending { it.startTime }
+                val ringsA = store.rings()
+                val ringTimes = (0 until ringsA.length()).map { ringsA.getJSONObject(it).getLong("time") }
+                val ringTypes = store.stringSet("ring_types")
                 json(ex, 200, JSONArray(list.map {
-                    JSONObject().put("start", it.startTime).put("end", it.endTime).put("time", it.startTime + corr)
+                    val t = it.startTime + corr
+                    val rang = ringTypes.isNotEmpty() && ringTimes.any { r -> r in (t - 10)..(t + (it.endTime - it.startTime) + 10) }
+                    JSONObject().put("start", it.startTime).put("end", it.endTime).put("time", t)
                         .put("duration", it.endTime - it.startTime).put("cached", media.cached(it.startTime) != null)
+                        .put("rang", rang)
                 }))
             }
             path == "/api/clip" && m == "GET" -> {
@@ -153,6 +171,7 @@ class Api(private val store: Store, private val bell: Doorbell, private val medi
             .put("ringTypes", JSONArray(store.stringSet("ring_types").sorted()))
             .put("vapidKey", WebPush.encode(WebPush.rawPublic(store.vapid().public as java.security.interfaces.ECPublicKey)))
             .put("devices", store.subscriptions().size)
+            .put("dndUntil", if (bell.dndActive()) bell.dndUntil() / 1000 else 0)
     }
 
     private fun replies() = JSONArray(store.replies().map {

@@ -58,6 +58,7 @@ class Doorbell(private val host: String, private val password: String, private v
                 }
                 seen.entries.removeIf { it.value < camNow - 900 }
                 primed = true
+                checkDndExpired()
                 status = "Verbonden"
                 lastOk = System.currentTimeMillis()
                 Thread.sleep(2500)
@@ -70,10 +71,39 @@ class Doorbell(private val host: String, private val password: String, private v
         }
     }
 
+    // ---- niet storen ----
+    fun dndUntil(): Long = store.getString("dnd_until")?.toLongOrNull() ?: 0L
+    fun dndActive() = dndUntil() > System.currentTimeMillis()
+
+    /** Turns "do not disturb" on until [untilMs] (0 = off): no notifications and the chime is silenced. */
+    @Synchronized
+    fun setDnd(untilMs: Long) {
+        val wasActive = dndActive()
+        if (untilMs > System.currentTimeMillis()) {
+            if (!wasActive) {
+                val chimeOn = try { client().chimeRingPlan()?.optString("enabled") == "on" } catch (_: Exception) { false }
+                store.putBool("dnd_chime_prev", chimeOn)
+                if (chimeOn) try { client().setChimeEnabled(false) } catch (e: Exception) { Log.w("Gong uitzetten mislukt: ${e.message}") }
+            }
+            store.putString("dnd_until", untilMs.toString())
+        } else {
+            store.putString("dnd_until", null)
+            if (wasActive && store.getBool("dnd_chime_prev", false)) {
+                try { client().setChimeEnabled(true) } catch (e: Exception) { Log.w("Gong aanzetten mislukt: ${e.message}") }
+            }
+            store.putBool("dnd_chime_prev", false)
+        }
+    }
+
+    private fun checkDndExpired() {
+        val until = dndUntil()
+        if (until in 1..System.currentTimeMillis()) { setDnd(0); Log.i("Niet storen afgelopen") }
+    }
+
     private fun ring(epochSec: Long, type: String) {
         store.addRing(epochSec, type)
         Log.i("Aanbelling/gebeurtenis type=$type")
-        if (!store.getBool("notifications", true)) return
+        if (!store.getBool("notifications", true) || dndActive()) return
         notifyAll(JSONObject().put("title", "Er staat iemand voor de deur").put("body", "Tik om te kijken wie het is")
             .put("time", epochSec).put("url", "/?live=1"))
     }
