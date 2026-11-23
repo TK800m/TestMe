@@ -1,0 +1,47 @@
+:root { --bg:#101418; --card:#1b2229; --fg:#e8edf2; --muted:#8a96a3; --accent:#f5a623; --red:#d0021b; }
+* { box-sizing:border-box; }
+body { margin:0; background:var(--bg); color:var(--fg); font:16px/1.4 -apple-system, system-ui, sans-serif;
+  padding:env(safe-area-inset-top) 0 calc(70px + env(safe-area-inset-bottom)); }
+header { display:flex; align-items:center; gap:12px; padding:10px 16px; position:sticky; top:0; background:var(--bg); z-index:5; }
+header h1 { font-size:20px; margin:0; flex:1; }
+.dot { width:10px; height:10px; border-radius:50%; background:var(--muted); }
+.dot.ok { background:#3c3; } .dot.bad { background:var(--red); }
+.sw { display:flex; align-items:center; gap:6px; font-size:13px; color:var(--muted); }
+.sw input { display:none; } .sw i { width:40px; height:24px; border-radius:12px; background:#444; position:relative; transition:.2s; }
+.sw i::after { content:""; position:absolute; width:20px; height:20px; border-radius:50%; background:#fff; top:2px; left:2px; transition:.2s; }
+.sw input:checked + i { background:var(--accent); } .sw input:checked + i::after { left:18px; }
+.sw input:disabled + i { opacity:.35; }
+main { padding:0 0 16px; }
+h2 { font-size:17px; margin:18px 16px 8px; }
+.player { background:#000; aspect-ratio:4/3; max-height:60vh; width:100%; display:flex; align-items:center; justify-content:center; position:relative; }
+.player video-stream, .player video { width:100%; height:100%; }
+.hint { color:var(--muted); padding:16px; text-align:center; }
+.controls { display:flex; justify-content:center; align-items:center; gap:28px; padding:14px; }
+.round { width:56px; height:56px; border-radius:50%; border:0; background:var(--card); color:var(--fg); font-size:24px; }
+.round.big { width:84px; height:84px; background:var(--accent); font-size:36px; }
+.round.big.on { background:var(--red); }
+.small { font-size:13px; color:var(--muted); margin:6px 16px; } .center { text-align:center; }
+.chips { display:flex; flex-wrap:wrap; gap:8px; padding:0 16px; }
+.chips.scroll { flex-wrap:nowrap; overflow-x:auto; padding-bottom:6px; }
+.chip { border:1px solid #39424c; background:var(--card); color:var(--fg); border-radius:18px; padding:8px 14px; font-size:14px; white-space:nowrap; }
+.chip.sel { background:var(--accent); color:#000; border-color:var(--accent); }
+.chip.busy { opacity:.5; }
+.list { list-style:none; margin:0; padding:0; }
+.list li { padding:12px 16px; border-bottom:1px solid #222a32; display:flex; justify-content:space-between; gap:8px; }
+.list.small li { padding:6px 16px; font-size:14px; color:var(--muted); }
+.row { display:flex; align-items:center; justify-content:space-between; padding:0 16px; } .row.gap { gap:10px; justify-content:flex-start; margin:10px 0; }
+.btn { background:var(--accent); color:#000; border:0; border-radius:10px; padding:10px 16px; font-size:15px; text-decoration:none; display:inline-block; }
+.btn.outline { background:transparent; color:var(--fg); border:1px solid #39424c; }
+.link { background:none; border:0; color:var(--accent); font-size:15px; }
+input:not([type]) { flex:1; background:var(--card); color:var(--fg); border:1px solid #39424c; border-radius:10px; padding:10px; font-size:16px; }
+.card { background:var(--card); margin:10px 16px; border-radius:12px; padding:12px; }
+.card .text { font-size:16px; margin-bottom:8px; }
+.card .acts { display:flex; gap:6px; flex-wrap:wrap; align-items:center; }
+.card .acts button { background:#28313a; color:var(--fg); border:0; border-radius:8px; padding:8px 10px; font-size:14px; }
+.card .acts button.rec { background:var(--red); }
+#clip-video { width:100%; background:#000; max-height:55vh; }
+nav { position:fixed; bottom:0; left:0; right:0; display:flex; background:#161c22; padding-bottom:env(safe-area-inset-bottom); border-top:1px solid #222a32; }
+nav button { flex:1; background:none; border:0; color:var(--muted); padding:8px 0; font-size:20px; display:flex; flex-direction:column; align-items:center; }
+nav button span { font-size:11px; } nav button.active { color:var(--accent); }
+#toast { position:fixed; left:16px; right:16px; bottom:90px; background:#2b3540; padding:12px 14px; border-radius:10px; z-index:9; }
+label.type { display:flex; gap:8px; align-items:center; padding:4px 16px; }

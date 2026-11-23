@@ -18,6 +18,28 @@ Eigen app voor de TP-Link Tapo D235 videodeurbel. Werkt **rechtstreeks via je th
    TP-Link/Tapo-account in. Tik **Opslaan en verbinden**.
 4. Tik op *Batterijbeperking uitzetten* zodat meldingen ook komen als de telefoon in slaap is.
 
+## Thuisserver (voor iPhone én Android)
+Een Raspberry Pi thuis luistert dag en nacht naar de deurbel en stuurt meldingen naar alle telefoons.
+Beide telefoons gebruiken een web-app op het beginscherm (geen App Store nodig).
+
+**Benodigd (± €100):** Raspberry Pi 5 (4 GB), officiële 27 W voeding, microSD 64 GB (A2), behuizing met ventilator, netwerkkabel.
+
+**Installeren**
+1. Zet *Raspberry Pi OS Lite (64-bit)* op de microSD met *Raspberry Pi Imager* (zet daarin SSH aan, gebruikersnaam/wachtwoord).
+2. Maak een gratis account op [tailscale.com](https://tailscale.com) en zet in de beheeromgeving onder **DNS** *MagicDNS* en *HTTPS Certificates* aan.
+3. Log via SSH in op de Pi en voer uit:
+   ```
+   curl -fsSL https://github.com/TK800m/TestMe/releases/download/deurbel-latest/install.sh | bash
+   ```
+   Vul het IP-adres van de deurbel en je TP-Link-wachtwoord in, en log in bij Tailscale via de link die verschijnt.
+4. Installeer de **Tailscale-app** op beide telefoons (zelfde account of deel de Pi met je partner) en open het adres dat het script toont.
+5. iPhone: Safari → *Deel* → *Zet op beginscherm*. Android: Chrome → menu → *Toevoegen aan startscherm*.
+   Open de app vanaf het beginscherm → *Instellingen* → **Meldingen aanzetten**.
+
+**Wat kan de web-app:** live beeld met geluid, praten, snelle antwoorden (Nederlandse stem of eigen stem),
+opnames terugkijken/downloaden/verwijderen, gong en meldingen aan/uit, ook buitenshuis via Tailscale.
+Live beeld en praten lopen via [go2rtc](https://github.com/AlexxIT/go2rtc); de rest via de eigen deurbel-server (`server/`).
+
 ## Goed om te weten
 - De deurbel moet eenmalig met de Tapo-app op wifi gezet zijn (zo komt hij op je netwerk). Daarna is de Tapo-app niet meer nodig.
 - Alles werkt lokaal: buiten je thuisnetwerk is er geen verbinding (bewust, geen cloud).

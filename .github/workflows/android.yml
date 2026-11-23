@@ -1,4 +1,4 @@
-name: Android APK
+name: Deurbel bouwen
 
 on:
   push:
@@ -23,13 +23,18 @@ jobs:
       - name: Tests en APK bouwen
         run: |
           chmod +x gradlew
-          ./gradlew :core:test :app:assembleRelease --no-daemon --stacktrace
-          cp app/build/outputs/apk/release/app-release.apk TapoDeurbel.apk
+          ./gradlew :core:test :server:test :app:assembleRelease :server:fatJar --no-daemon --stacktrace
+          mkdir -p dist
+          cp app/build/outputs/apk/release/app-release.apk dist/TapoDeurbel.apk
+          cp server/build/libs/deurbel-server.jar server/docker/Dockerfile server/docker/docker-compose.yml server/docker/install.sh dist/
+
+      - name: Docker-image thuisserver testen
+        run: docker build -t deurbel-test dist
 
       - uses: actions/upload-artifact@v4
         with:
-          name: TapoDeurbel-apk
-          path: TapoDeurbel.apk
+          name: deurbel
+          path: dist/*
 
       - name: Downloadlink bijwerken (release "deurbel-latest")
         uses: softprops/action-gh-release@v2
@@ -38,5 +43,8 @@ jobs:
           name: Deurbel-app (laatste versie)
           prerelease: true
           target_commitish: ${{ github.sha }}
-          body: "Automatisch gebouwd van ${{ github.ref_name }} (${{ github.sha }}). Download TapoDeurbel.apk en open het op je Android-telefoon."
-          files: TapoDeurbel.apk
+          body: |
+            Automatisch gebouwd van ${{ github.ref_name }} (${{ github.sha }}).
+            - Android-app: download TapoDeurbel.apk op je Android-telefoon.
+            - Thuisserver (iPhone + Android): op de Raspberry Pi `curl -fsSL https://github.com/${{ github.repository }}/releases/download/deurbel-latest/install.sh | bash`
+          files: dist/*

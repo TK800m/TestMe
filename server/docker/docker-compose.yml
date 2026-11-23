@@ -1,0 +1,16 @@
+# Deurbel thuisserver: go2rtc (live beeld + praten) en de deurbel-server (meldingen, opnames, antwoorden).
+services:
+  go2rtc:
+    image: alexxit/go2rtc:latest
+    network_mode: host
+    restart: unless-stopped
+    volumes:
+      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+
+  deurbel:
+    build: .
+    network_mode: host
+    restart: unless-stopped
+    env_file: .env
+    volumes:
+      - ./data:/data

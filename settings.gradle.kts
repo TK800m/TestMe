@@ -13,4 +13,4 @@ dependencyResolutionManagement {
     }
 }
 rootProject.name = "TapoDeurbel"
-include(":core", ":app")
+include(":core", ":app", ":server")

@@ -1,0 +1,80 @@
+<!doctype html>
+<html lang="nl">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+<meta name="theme-color" content="#101418">
+<meta name="apple-mobile-web-app-capable" content="yes">
+<meta name="apple-mobile-web-app-status-bar-style" content="black-translucent">
+<meta name="apple-mobile-web-app-title" content="Deurbel">
+<link rel="manifest" href="/manifest.webmanifest">
+<link rel="apple-touch-icon" href="/icon-180.png">
+<link rel="icon" href="/icon-192.png">
+<link rel="stylesheet" href="/style.css">
+<title>Deurbel</title>
+</head>
+<body>
+<header>
+  <span id="conn" class="dot"></span><h1>Deurbel</h1>
+  <label class="sw"><span>Meldingen</span><input type="checkbox" id="notify"><i></i></label>
+  <label class="sw"><span>Gong</span><input type="checkbox" id="chime"><i></i></label>
+</header>
+
+<main>
+  <section id="tab-live" class="tab">
+    <div id="player" class="player"><div class="hint">Live beeld laden…</div></div>
+    <div class="controls">
+      <button id="btn-sound" class="round" title="Geluid van buiten">🔇</button>
+      <button id="btn-talk" class="round big" title="Praten">🎤</button>
+      <button id="btn-reload" class="round" title="Opnieuw laden">⟳</button>
+    </div>
+    <p id="talk-hint" class="small center">Tik op de microfoon om te praten, nogmaals om te stoppen.</p>
+    <h2>Snel antwoorden</h2>
+    <div id="quick" class="chips"></div>
+    <h2>Laatst aangebeld</h2>
+    <ul id="rings" class="list small"></ul>
+  </section>
+
+  <section id="tab-clips" class="tab" hidden>
+    <div class="row"><h2>Opnames</h2><button id="clips-reload" class="link">Vernieuwen</button></div>
+    <div id="days" class="chips scroll"></div>
+    <div id="clip-view" hidden>
+      <video id="clip-video" controls playsinline></video>
+      <div class="row gap">
+        <a id="clip-download" class="btn">⬇ Downloaden</a>
+        <button id="clip-delete" class="btn outline">🗑 Verwijderen</button>
+        <button id="clip-close" class="link">Sluiten</button>
+      </div>
+    </div>
+    <ul id="clips" class="list"></ul>
+  </section>
+
+  <section id="tab-replies" class="tab" hidden>
+    <p class="small">Snelle antwoorden worden in het Nederlands door de deurbel uitgesproken. Neem per antwoord je eigen stem op als je dat liever hebt.</p>
+    <div id="replies"></div>
+    <div class="row gap"><input id="new-reply" placeholder="Nieuw antwoord…"><button id="add-reply" class="btn">Toevoegen</button></div>
+  </section>
+
+  <section id="tab-settings" class="tab" hidden>
+    <h2>Meldingen op dit toestel</h2>
+    <p id="push-state" class="small"></p>
+    <div class="row gap"><button id="push-on" class="btn">Meldingen aanzetten</button><button id="push-test" class="btn outline">Test</button></div>
+    <p class="small" id="ios-hint" hidden>Op de iPhone: open deze pagina in Safari, tik op <b>Deel</b> → <b>Zet op beginscherm</b>, open de app vanaf het beginscherm en tik dan op "Meldingen aanzetten".</p>
+    <h2>Melden bij</h2>
+    <p class="small">Niets aangevinkt = bij elke gebeurtenis (aanbellen én beweging).</p>
+    <div id="types"></div>
+    <h2>Status</h2>
+    <p id="status" class="small"></p>
+  </section>
+</main>
+
+<nav>
+  <button data-tab="live" class="active">📹<span>Live</span></button>
+  <button data-tab="clips">🎞<span>Opnames</span></button>
+  <button data-tab="replies">💬<span>Antwoorden</span></button>
+  <button data-tab="settings">⚙️<span>Instellingen</span></button>
+</nav>
+<div id="toast" hidden></div>
+<script type="module" src="/app.js"></script>
+</body>
+</html>
