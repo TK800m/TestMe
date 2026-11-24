@@ -209,7 +209,7 @@ fun LiveScreen() {
                 }
             ) {
                 Box(contentAlignment = Alignment.Center) {
-                    Icon(Icons.Filled.Mic, "Houd ingedrukt om te praten", tint = Color.Black, modifier = Modifier.size(40.dp))
+                    Icon(Icons.Filled.Mic, "Houd ingedrukt om te praten", tint = if (talking) Color.White else MaterialTheme.colorScheme.onPrimary, modifier = Modifier.size(40.dp))
                 }
             }
             Spacer(Modifier.size(56.dp))

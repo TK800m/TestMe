@@ -39,6 +39,11 @@ class Prefs(context: Context) {
         get() = sp.getStringSet("seen_types", emptySet()) ?: emptySet()
         set(v) = sp.edit().putStringSet("seen_types", v).apply()
 
+    /** "system", "light" or "dark". */
+    var theme: String
+        get() = sp.getString("theme", "system") ?: "system"
+        set(v) = sp.edit().putString("theme", v).apply()
+
     var hdLive: Boolean
         get() = sp.getBoolean("hd", true)
         set(v) = sp.edit().putBoolean("hd", v).apply()

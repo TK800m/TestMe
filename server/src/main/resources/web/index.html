@@ -13,6 +13,7 @@
 <link rel="apple-touch-icon" href="/icon-180.png">
 <link rel="icon" href="/icon-192.png">
 <link rel="stylesheet" href="/style.css">
+<script>try { const t = localStorage.getItem('theme'); if (t === 'light' || t === 'dark') document.documentElement.dataset.theme = t; } catch (e) {}</script>
 <title>Deurbel</title>
 </head>
 <body>
@@ -82,6 +83,14 @@
 <!-- ============ INSTELLINGEN ============ -->
 <section id="view-settings" class="view" hidden>
   <header class="page-head"><h1>Instellingen</h1></header>
+
+  <h3 class="section-title">Weergave</h3>
+  <div class="card"><div class="row">
+    <span class="ico-wrap grey"><svg data-i="sun"></svg></span>
+    <div class="seg full grow-seg" id="theme-seg">
+      <button data-t="system">Automatisch</button><button data-t="light">Licht</button><button data-t="dark">Donker</button>
+    </div>
+  </div></div>
 
   <h3 class="section-title">Meldingen</h3>
   <div class="card">

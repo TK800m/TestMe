@@ -30,6 +30,7 @@ const ICONS = {
   plusSquare: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/>',
   person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   loader: '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+  sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
@@ -562,6 +563,21 @@ $('#fw-auto').onchange = async (e) => {
   try { await post('/api/firmware/auto', { on: e.target.checked }); toast(e.target.checked ? 'Automatisch bijwerken staat aan' : 'Automatisch bijwerken staat uit'); }
   catch (err) { e.target.checked = !e.target.checked; toast(err.message); }
 };
+
+// ---------- theme ----------
+function applyTheme(t) {
+  const root = document.documentElement;
+  root.dataset.theme = t === 'light' || t === 'dark' ? t : 'system';
+  try { localStorage.setItem('theme', t); } catch (e) {}
+  const dark = t === 'dark' || (t !== 'light' && matchMedia('(prefers-color-scheme: dark)').matches);
+  $$('meta[name="theme-color"]').forEach((m) => { m.media = 'all'; m.content = dark ? '#0b0d10' : '#f2f3f5'; });
+  $$('#theme-seg button').forEach((b) => b.classList.toggle('on', b.dataset.t === t));
+}
+let themeChoice = 'system';
+try { themeChoice = localStorage.getItem('theme') || 'system'; } catch (e) {}
+applyTheme(themeChoice);
+$$('#theme-seg button').forEach((b) => (b.onclick = () => { buzz(); themeChoice = b.dataset.t; applyTheme(themeChoice); }));
+matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => applyTheme(themeChoice));
 
 // ---------- onboarding ----------
 let installPrompt = null;

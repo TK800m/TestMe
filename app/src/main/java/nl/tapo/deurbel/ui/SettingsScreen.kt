@@ -50,7 +50,7 @@ import nl.tapo.deurbel.Scanner
 
 @SuppressLint("BatteryLife")
 @Composable
-fun SettingsScreen(onSaved: () -> Unit) {
+fun SettingsScreen(onSaved: () -> Unit, theme: String = "system", onTheme: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val prefs = remember { Prefs(ctx) }
     val scope = rememberCoroutineScope()
@@ -115,6 +115,15 @@ fun SettingsScreen(onSaved: () -> Unit) {
             }
         }) { Text("Opslaan en verbinden") }
         status?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
+
+        HorizontalDivider()
+        Text("Weergave", style = MaterialTheme.typography.titleMedium)
+        Row(horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+            listOf("system" to "Automatisch", "light" to "Licht", "dark" to "Donker").forEach { (key, label) ->
+                androidx.compose.material3.FilterChip(selected = theme == key, onClick = { onTheme(key) }, label = { Text(label) })
+            }
+        }
+        Text("Automatisch volgt de instelling van je telefoon.", style = MaterialTheme.typography.bodySmall)
 
         HorizontalDivider()
         Text("Meldingen", style = MaterialTheme.typography.titleMedium)

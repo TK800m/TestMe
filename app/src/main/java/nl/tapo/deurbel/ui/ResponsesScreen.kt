@@ -79,7 +79,7 @@ fun ResponsesScreen() {
         }
     }
 
-    Scaffold(floatingActionButton = {
+    Scaffold(contentWindowInsets = androidx.compose.foundation.layout.WindowInsets(0), floatingActionButton = {
         ExtendedFloatingActionButton(onClick = { adding = true }, icon = { Icon(Icons.Filled.Add, null) }, text = { Text("Nieuw antwoord") })
     }) { pad ->
         LazyColumn(Modifier.fillMaxSize().padding(pad), contentPadding = androidx.compose.foundation.layout.PaddingValues(12.dp),
