@@ -271,7 +271,10 @@ class TpapTransport(
 
     @Synchronized
     override fun send(request: JSONObject): JSONObject {
-        val payload = request.toString().toByteArray()
+        // this channel only accepts multipleRequest (as the Tapo app sends it)
+        val wrapped = if (request.optString("method") == "multipleRequest") request
+        else JSONObject().put("method", "multipleRequest").put("params", JSONObject().put("requests", JSONArray().put(request)))
+        val payload = wrapped.toString().toByteArray()
         for (attempt in 0..1) {
             try {
                 if (!loggedIn()) login()

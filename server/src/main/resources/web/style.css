@@ -194,3 +194,19 @@ textarea { width: 100%; font: inherit; font-size: 18px; color: var(--text); back
   background: #2a2f36; color: #fff; padding: 13px 16px; border-radius: 14px; box-shadow: 0 10px 30px rgba(0,0,0,.35); animation: up .25s ease; }
 .toast span { flex: 1; font-size: 15px; } .toast button { color: var(--accent); font-weight: 700; }
 @media (min-width: 700px) { body { max-width: 560px; margin: 0 auto; } .tabbar { max-width: 560px; margin: 0 auto; } }
+
+/* ---------- firmware ---------- */
+.fw-hero { display: flex; flex-direction: column; align-items: center; text-align: center; gap: 10px; padding: 18px 0 8px; }
+.fw-hero .big { width: 64px; height: 64px; border-radius: 18px; display: grid; place-items: center; background: var(--surface-2); }
+.fw-hero .big svg { width: 30px; height: 30px; }
+.fw-hero .big.ok { background: rgba(48,209,88,.15); color: var(--green); }
+.fw-hero .big.new { background: rgba(245,165,36,.16); color: var(--accent); }
+.fw-hero b { font-size: 18px; } .fw-hero span { color: var(--muted); font-size: 14px; }
+.fw-notes { background: var(--surface-2); border-radius: 14px; padding: 12px 14px; font-size: 14px; color: var(--muted);
+  white-space: pre-wrap; max-height: 28vh; overflow: auto; margin-top: 12px; }
+.fw-warn { display: flex; gap: 10px; align-items: flex-start; font-size: 13px; color: var(--muted); margin: 14px 2px 0; }
+.fw-warn svg { width: 18px; height: 18px; color: var(--accent); margin-top: 1px; }
+.progress { height: 8px; border-radius: 4px; background: var(--surface-2); overflow: hidden; width: 100%; margin-top: 6px; }
+.progress i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .6s ease; }
+.progress.indet i { width: 35% !important; animation: indet 1.3s ease-in-out infinite; }
+@keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(300%); } }

@@ -3,6 +3,7 @@ package nl.tapo.deurbel.server
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
 import nl.tapo.deurbel.core.Recording
+import nl.tapo.deurbel.core.TapoClient
 import org.json.JSONArray
 import org.json.JSONObject
 import java.io.File
@@ -91,6 +92,29 @@ class Api(private val store: Store, private val bell: Doorbell, private val medi
                 bell.setDnd(until)
                 chimeCache = null
                 json(ex, 200, status())
+            }
+            path == "/api/firmware" && m == "GET" -> {
+                val c = bell.client()
+                val info = c.deviceInfo()
+                val current = info.optString("sw_version")
+                val o = JSONObject().put("current", current).put("model", info.optString("device_model"))
+                    .put("autoUpdate", c.autoUpgrade() ?: JSONObject.NULL)
+                c.firmwareStatus()?.let { o.put("status", it) }
+                if (q["check"] == "1") {
+                    val up = c.checkFirmware()
+                    o.put("checked", true).put("available", TapoClient.firmwareAvailable(up, current))
+                        .put("latest", up.optString("version")).put("releaseNote", up.optString("release_note"))
+                }
+                json(ex, 200, o)
+            }
+            path == "/api/firmware/install" && m == "POST" -> {
+                bell.client().startFirmwareUpgrade()
+                Log.i("Firmware-update gestart")
+                json(ex, 200, JSONObject().put("ok", true))
+            }
+            path == "/api/firmware/auto" && m == "POST" -> {
+                bell.client().setAutoUpgrade(body(ex).getBoolean("on"))
+                json(ex, 200, JSONObject().put("ok", true))
             }
             path == "/api/days" -> {
                 val end = Calendar.getInstance(); val start = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -90) }

@@ -142,9 +142,55 @@ class TapoClient(val host: String, private val cloudPassword: String, private va
             .optJSONObject("harddisk_manage")?.optJSONArray("hd_info")
     } catch (e: TapoException) { null }
 
+    // ---- firmware ----
+    /** Asks the doorbell to check TP-Link for new firmware; returns the camera's upgrade_info. */
+    fun checkFirmware(): JSONObject {
+        val req = JSONObject().put("method", "multipleRequest").put("params", JSONObject().put("requests", JSONArray()
+            .put(JSONObject().put("method", "checkFirmwareVersionByCloud").put("params", JSONObject().put("cloud_config", JSONObject().put("check_fw_version", "null"))))
+            .put(JSONObject().put("method", "getCloudConfig").put("params", JSONObject().put("cloud_config", JSONObject().put("name", JSONArray().put("upgrade_info")))))))
+        val res = transport.send(req)
+        val responses = res.optJSONObject("result")?.optJSONArray("responses") ?: throw TapoException(res.optInt("error_code"), "Geen antwoord")
+        for (i in 0 until responses.length()) {
+            val r = responses.optJSONObject(i) ?: continue
+            r.optJSONObject("result")?.optJSONObject("cloud_config")?.optJSONObject("upgrade_info")?.let { return it }
+        }
+        val code = (0 until responses.length()).map { responses.optJSONObject(it)?.optInt("error_code", 0) ?: 0 }.firstOrNull { it != 0 }
+        throw TapoException(code, code?.let { describe(it) } ?: "Geen firmware-informatie ontvangen")
+    }
+
+    /** Starts downloading and installing the new firmware (the doorbell restarts afterwards). */
+    fun startFirmwareUpgrade() {
+        val res = transport.send(JSONObject().put("method", "do").put("cloud_config", JSONObject().put("fw_download", "null")))
+        val r = res.optJSONObject("result")?.optJSONArray("responses")?.optJSONObject(0) ?: res
+        val code = r.optInt("error_code", 0)
+        if (code != 0) throw TapoException(code, if (code == -1) "Geen nieuwe firmware beschikbaar" else describe(code))
+    }
+
+    fun firmwareStatus(): JSONObject? = try {
+        execute("getFirmwareUpdateStatus", JSONObject().put("cloud_config", JSONObject().put("name", "upgrade_status")))
+            .optJSONObject("cloud_config")?.optJSONObject("upgrade_status")
+    } catch (e: TapoException) { null }
+
+    fun autoUpgrade(): Boolean? = try {
+        execute("getFirmwareAutoUpgradeConfig", JSONObject().put("auto_upgrade", JSONObject().put("name", JSONArray().put("common"))))
+            .optJSONObject("auto_upgrade")?.optJSONObject("common")?.optString("enabled")?.let { it == "on" }
+    } catch (e: TapoException) { null }
+
+    fun setAutoUpgrade(on: Boolean) {
+        execute("setFirmwareAutoUpgradeConfig", JSONObject().put("auto_upgrade", JSONObject().put("common",
+            JSONObject().put("enabled", if (on) "on" else "off").put("random_range", 120))))
+    }
+
     fun mediaSession(): MediaSession = MediaSession(host, cloudPassword, preferSha256)
 
     companion object {
+        /** True when upgrade_info describes a newer firmware than [current]. */
+        fun firmwareAvailable(info: JSONObject, current: String): Boolean {
+            val version = info.optString("version")
+            val type = info.optString("type", "0")
+            return version.isNotBlank() && type != "0" && !current.startsWith(version.substringBefore(" Build").trim())
+        }
+
         /** Unwraps lists like [{"search_video_results_0": {...}}, ...]. */
         fun flatten(arr: JSONArray): List<JSONObject> = (0 until arr.length()).mapNotNull { i ->
             val o = arr.optJSONObject(i) ?: return@mapNotNull null

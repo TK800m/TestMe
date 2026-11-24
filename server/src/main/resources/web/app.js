@@ -30,6 +30,10 @@ const ICONS = {
   plusSquare: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/>',
   person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   loader: '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+  download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
+  refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
+  shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+  alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
 };
 const icon = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24">${ICONS[n] || ''}</svg>`;
 function paintIcons(root = document) {
@@ -366,6 +370,7 @@ $('#set-test').onclick = async () => { buzz(); try { const r = await post('/api/
 // ---------- settings ----------
 async function renderSettings() {
   updatePushNotice();
+  if (!fw) loadFirmwareSummary();
   if (!status) return;
   $('#set-notify').checked = status.notifications;
   $('#set-chime').checked = status.chime === true;
@@ -491,6 +496,72 @@ $('#edit-delete').onclick = async () => {
   setTimeout(async () => { if (!undone) { try { replies = await api(`/api/replies/${r.id}`, { method: 'DELETE' }); renderReplyList(); } catch (e) { toast(e.message); } } }, 5200);
 };
 $('#reply-add').onclick = () => { buzz(); openEditor(null); };
+
+// ---------- firmware ----------
+let fw = null, fwPoll = null;
+async function loadFirmwareSummary() {
+  try {
+    fw = await api('/api/firmware');
+    $('#fw-sub').textContent = `${fw.model ? fw.model + ' · ' : ''}versie ${fw.current.split(' ')[0] || '?'}`;
+    $('#fw-auto').checked = fw.autoUpdate === true; $('#fw-auto').disabled = fw.autoUpdate === null;
+  } catch (e) { $('#fw-sub').textContent = 'Niet bereikbaar'; }
+}
+function fwHero(cls, ico, title, sub) {
+  return `<div class="fw-hero"><span class="big ${cls}">${icon(ico)}</span><b>${title}</b><span>${sub}</span></div>`;
+}
+async function openFirmware() {
+  buzz(); openSheet('#sheet-fw');
+  const body = $('#fw-body');
+  body.innerHTML = fwHero('', 'refresh', 'Zoeken naar updates…', 'De deurbel vraagt het na bij TP-Link') + '<div class="progress indet"><i></i></div>';
+  let info;
+  try { info = await api('/api/firmware?check=1'); }
+  catch (e) { body.innerHTML = fwHero('', 'alert', 'Zoeken lukte niet', e.message) + '<button class="btn wide" id="fw-retry">Opnieuw</button>'; $('#fw-retry').onclick = openFirmware; return; }
+  const cur = info.current.split(' ')[0];
+  if (!info.available) {
+    body.innerHTML = fwHero('ok', 'shield', 'Je deurbel is up-to-date', `Versie ${cur}`) +
+      '<button class="btn ghost wide" id="fw-close">Sluiten</button>';
+    $('#fw-close').onclick = closeSheet; $('#fw-badge').hidden = true; return;
+  }
+  $('#fw-badge').hidden = false;
+  const latest = info.latest.split(' ')[0];
+  body.innerHTML = fwHero('new', 'download', `Nieuwe versie ${latest}`, `Nu geïnstalleerd: ${cur}`) +
+    (info.releaseNote ? `<div class="fw-notes"></div>` : '') +
+    `<div class="fw-warn">${icon('alert')}<span>De deurbel downloadt de update zelf bij TP-Link en start daarna opnieuw op. Hij is dan een paar minuten niet bereikbaar. Haal de stroom er niet af.</span></div>
+     <button class="btn wide" id="fw-install">Nu installeren</button>`;
+  if (info.releaseNote) $('.fw-notes', body).textContent = info.releaseNote;
+  $('#fw-install').onclick = () => installFirmware(cur, latest);
+}
+async function installFirmware(cur, latest) {
+  buzz(30);
+  const body = $('#fw-body');
+  try { await post('/api/firmware/install'); }
+  catch (e) { toast('Installeren mislukt: ' + e.message); return; }
+  body.innerHTML = fwHero('new', 'download', `Bijwerken naar ${latest}…`, 'Laat de deurbel aan de stroom') +
+    '<div class="progress indet" id="fw-prog"><i></i></div><p class="foot center" id="fw-state" style="margin:10px 0 0">Downloaden…</p>';
+  const started = Date.now();
+  clearInterval(fwPoll);
+  fwPoll = setInterval(async () => {
+    let s = null;
+    try { s = await api('/api/firmware'); } catch (e) { $('#fw-state').textContent = 'De deurbel start opnieuw op…'; }
+    if (s) {
+      const now = s.current.split(' ')[0];
+      if (now && now !== cur) {
+        clearInterval(fwPoll);
+        body.innerHTML = fwHero('ok', 'shield', 'Bijgewerkt!', `De deurbel draait nu versie ${now}`) + '<button class="btn wide" id="fw-done">Klaar</button>';
+        $('#fw-done').onclick = closeSheet; $('#fw-badge').hidden = true; buzz(40); loadFirmwareSummary(); return;
+      }
+      const st = s.status || {}; const pct = parseInt(st.progress ?? st.percent ?? '', 10);
+      if (!isNaN(pct) && pct > 0) { $('#fw-prog').classList.remove('indet'); $('#fw-prog i').style.width = pct + '%'; $('#fw-state').textContent = `${pct}%`; }
+    }
+    if (Date.now() - started > 15 * 60 * 1000) { clearInterval(fwPoll); $('#fw-state').textContent = 'Dit duurt lang. Kijk later nog eens bij Instellingen.'; }
+  }, 5000);
+}
+$('#fw-row').onclick = openFirmware;
+$('#fw-auto').onchange = async (e) => {
+  buzz();
+  try { await post('/api/firmware/auto', { on: e.target.checked }); toast(e.target.checked ? 'Automatisch bijwerken staat aan' : 'Automatisch bijwerken staat uit'); }
+  catch (err) { e.target.checked = !e.target.checked; toast(err.message); }
+};
 
 // ---------- onboarding ----------
 let installPrompt = null;

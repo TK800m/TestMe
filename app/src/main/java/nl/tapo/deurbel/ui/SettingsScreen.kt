@@ -64,6 +64,10 @@ fun SettingsScreen(onSaved: () -> Unit) {
     var scanning by remember { mutableStateOf(false) }
     var ringTypes by remember { mutableStateOf(prefs.ringTypes) }
     var advanced by remember { mutableStateOf(prefs.rtspUser.isNotBlank()) }
+    var fwText by remember { mutableStateOf<String?>(null) }
+    var fwNew by remember { mutableStateOf<String?>(null) }
+    var fwBusy by remember { mutableStateOf(false) }
+    var fwConfirm by remember { mutableStateOf(false) }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
         Text("Deurbel koppelen", style = MaterialTheme.typography.titleLarge)
@@ -142,6 +146,31 @@ fun SettingsScreen(onSaved: () -> Unit) {
         }
 
         HorizontalDivider()
+        Text("Software van de deurbel", style = MaterialTheme.typography.titleMedium)
+        OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = !fwBusy && prefs.configured, onClick = {
+            fwBusy = true; fwNew = null; fwText = "Zoeken naar updates…"
+            scope.launch {
+                fwText = try {
+                    withContext(Dispatchers.IO) {
+                        val c = Camera.client(ctx)
+                        val current = c.deviceInfo().optString("sw_version")
+                        val up = c.checkFirmware()
+                        if (nl.tapo.deurbel.core.TapoClient.firmwareAvailable(up, current)) {
+                            fwNew = up.optString("version")
+                            "Nieuwe versie ${up.optString("version")} beschikbaar (nu: $current)." +
+                                up.optString("release_note").let { if (it.isBlank()) "" else "\n\n$it" }
+                        } else "Je deurbel is up-to-date (versie $current)."
+                    }
+                } catch (e: Exception) { "Zoeken lukte niet: ${Camera.friendly(e)}" }
+                fwBusy = false
+            }
+        }) { Text(if (fwBusy) "Bezig…" else "Zoeken naar updates") }
+        fwText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
+        if (fwNew != null) {
+            Button(modifier = Modifier.fillMaxWidth(), onClick = { fwConfirm = true }) { Text("Nu installeren") }
+        }
+
+        HorizontalDivider()
         TextButton(onClick = { advanced = !advanced }) { Text(if (advanced) "Geavanceerd verbergen" else "Geavanceerd") }
         if (advanced) {
             Text("Optioneel: live beeld via RTSP met het camera-account (alleen nodig als het standaard live beeld niet werkt).",
@@ -158,5 +187,26 @@ fun SettingsScreen(onSaved: () -> Unit) {
             }) { Text("Verborgen opnames terugzetten") }
         }
         Spacer(Modifier.height(32.dp))
+    }
+
+    if (fwConfirm) {
+        androidx.compose.material3.AlertDialog(
+            onDismissRequest = { fwConfirm = false },
+            title = { Text("Update installeren?") },
+            text = { Text("De deurbel downloadt versie $fwNew zelf bij TP-Link en start daarna opnieuw op. Hij is dan een paar minuten niet bereikbaar. Haal de stroom er niet af.") },
+            confirmButton = {
+                TextButton(onClick = {
+                    fwConfirm = false
+                    scope.launch {
+                        fwText = try {
+                            withContext(Dispatchers.IO) { Camera.client(ctx).startFirmwareUpgrade() }
+                            fwNew = null
+                            "Update gestart. De deurbel start over een paar minuten opnieuw op."
+                        } catch (e: Exception) { "Installeren mislukt: ${Camera.friendly(e)}" }
+                    }
+                }) { Text("Installeren") }
+            },
+            dismissButton = { TextButton(onClick = { fwConfirm = false }) { Text("Annuleren") } }
+        )
     }
 }
