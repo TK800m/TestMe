@@ -37,12 +37,16 @@ class Doorbell(private val host: String, private val password: String, private v
         client = null
     }
 
+    @Volatile private var running = true
+
     fun start() = Thread({ loop() }, "doorbell-watch").apply { isDaemon = true; start() }
+
+    fun stop() { running = false; reset() }
 
     private fun loop() {
         val seen = HashMap<String, Long>()
         var primed = false
-        while (true) {
+        while (running) {
             try {
                 val c = client()
                 val corr = c.timeCorrection()

@@ -2,6 +2,8 @@ package nl.tapo.deurbel.server
 
 import com.sun.net.httpserver.HttpExchange
 import com.sun.net.httpserver.HttpServer
+import nl.tapo.deurbel.core.CameraHttps
+import nl.tapo.deurbel.core.Hashes
 import nl.tapo.deurbel.core.Recording
 import nl.tapo.deurbel.core.TapoClient
 import org.json.JSONArray
@@ -11,6 +13,7 @@ import java.io.RandomAccessFile
 import java.net.InetSocketAddress
 import java.net.URI
 import java.net.URLDecoder
+import java.net.URLEncoder
 import java.net.http.HttpClient
 import java.net.http.HttpRequest
 import java.net.http.HttpResponse
@@ -22,9 +25,6 @@ import java.util.UUID
 import java.util.concurrent.Executors
 
 fun main() {
-    val host = System.getenv("TAPO_IP")?.trim().orEmpty()
-    val password = System.getenv("TAPO_PASSWORD").orEmpty()
-    require(host.isNotEmpty() && password.isNotEmpty()) { "Stel TAPO_IP en TAPO_PASSWORD in (.env)" }
     val dataDir = File(System.getenv("DATA_DIR") ?: "/data").apply { mkdirs() }
     val bind = System.getenv("BIND") ?: "127.0.0.1"
     val port = (System.getenv("PORT") ?: "8080").toInt()
@@ -32,16 +32,101 @@ fun main() {
 
     val store = Store(dataDir)
     store.vapid()
-    val bell = Doorbell(host, password, store)
-    val media = Media(dataDir, bell, store)
-    bell.start()
-    Api(store, bell, media, go2rtc).serve(bind, port)
-    Log.i("Deurbel-server draait op http://$bind:$port")
+    // optional: settings from the environment (older installations)
+    val envIp = System.getenv("TAPO_IP")?.trim().orEmpty()
+    val envPw = System.getenv("TAPO_PASSWORD").orEmpty()
+    if (envIp.isNotEmpty() && envPw.isNotEmpty() && store.getString("tapo_ip") == null) {
+        store.putString("tapo_ip", envIp); store.putString("tapo_pw", envPw)
+    }
+    val app = App(store, dataDir, go2rtc)
+    app.startIfConfigured()
+    Api(store, app, go2rtc).serve(bind, port)
+    Log.i("Deurbel-server draait op http://$bind:$port" + if (app.bell == null) " (nog niet gekoppeld)" else "")
+}
+
+/** Holds the doorbell connection once it has been set up from the web app. */
+class App(private val store: Store, private val dataDir: File, private val go2rtc: String) {
+    @Volatile var bell: Doorbell? = null
+        private set
+    @Volatile var media: Media? = null
+        private set
+    private val http = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
+
+    fun startIfConfigured() {
+        val ip = store.getString("tapo_ip") ?: return
+        val pw = store.getString("tapo_pw") ?: return
+        start(ip, pw)
+    }
+
+    @Synchronized
+    private fun start(ip: String, pw: String) {
+        bell?.stop()
+        val b = Doorbell(ip, pw, store)
+        bell = b
+        media = Media(dataDir, b, store)
+        b.start()
+        Thread({ ensureGo2rtc(ip, pw) }, "go2rtc-setup").apply { isDaemon = true; start() }
+    }
+
+    /** Tests the login, saves the settings and starts listening. Returns the device info. */
+    fun setup(ip: String, pw: String): JSONObject {
+        val oldPin = store.getString("cert_pin")
+        if (ip != store.getString("tapo_ip")) store.putString("cert_pin", null)
+        val info = try {
+            TapoClient(ip, pw, CameraHttps(store.getString("cert_pin")) { store.putString("cert_pin", it) }).deviceInfo()
+        } catch (e: Exception) {
+            if (ip != store.getString("tapo_ip")) store.putString("cert_pin", oldPin)
+            throw e
+        }
+        store.putString("tapo_ip", ip); store.putString("tapo_pw", pw)
+        start(ip, pw)
+        return info
+    }
+
+    /** Tells go2rtc (live view + talk) how to reach the doorbell. */
+    private fun ensureGo2rtc(ip: String, pw: String) {
+        val enc = { s: String -> URLEncoder.encode(s, "UTF-8") }
+        val sha = Hashes.sha256HexUpper(pw)
+        val sources = listOf("tapo://${enc(pw)}@$ip", "tapo://admin:$sha@$ip")
+        val q = "name=deurbel&" + sources.joinToString("&") { "src=" + enc(it) }
+        repeat(30) {
+            try {
+                val res = http.send(HttpRequest.newBuilder(URI("$go2rtc/api/streams?$q")).timeout(Duration.ofSeconds(10))
+                    .PUT(HttpRequest.BodyPublishers.noBody()).build(), HttpResponse.BodyHandlers.discarding())
+                if (res.statusCode() < 300) { Log.i("Live beeld ingesteld in go2rtc"); return }
+                Log.w("go2rtc antwoordde ${res.statusCode()}")
+            } catch (e: Exception) { /* go2rtc is still starting */ }
+            Thread.sleep(5000)
+        }
+        Log.w("go2rtc niet bereikbaar; live beeld werkt nog niet")
+    }
+
+    /** Finds Tapo devices on the local network (they listen on port 8800 and 443). */
+    fun scan(): List<String> {
+        val prefixes = java.net.NetworkInterface.getNetworkInterfaces().toList()
+            .filter { it.isUp && !it.isLoopback && !it.name.startsWith("docker") && !it.name.startsWith("br-") &&
+                !it.name.startsWith("veth") && !it.name.startsWith("tailscale") }
+            .flatMap { it.inetAddresses.toList() }
+            .filterIsInstance<java.net.Inet4Address>().filter { it.isSiteLocalAddress }
+            .map { it.hostAddress.substringBeforeLast('.') + "." }.distinct()
+        val pool = Executors.newFixedThreadPool(64)
+        try {
+            val jobs = prefixes.flatMap { p -> (1..254).map { p + it } }.map { ip ->
+                pool.submit<String?> {
+                    try { java.net.Socket().use { it.connect(InetSocketAddress(ip, 8800), 500) }; ip } catch (_: Exception) { null }
+                }
+            }
+            return jobs.mapNotNull { it.get() }
+        } finally { pool.shutdownNow() }
+    }
 }
 
 class HttpError(val code: Int, msg: String) : Exception(msg)
 
-class Api(private val store: Store, private val bell: Doorbell, private val media: Media, private val go2rtc: String) {
+class Api(private val store: Store, private val app: App, private val go2rtc: String) {
+    private val bell: Doorbell get() = app.bell ?: throw HttpError(503, "De deurbel is nog niet gekoppeld")
+    private val media: Media get() = app.media ?: throw HttpError(503, "De deurbel is nog niet gekoppeld")
+
     private val proxy = HttpClient.newBuilder().connectTimeout(Duration.ofSeconds(5)).build()
     private val dayFmt = SimpleDateFormat("yyyyMMdd", Locale.US)
 
@@ -68,6 +153,24 @@ class Api(private val store: Store, private val bell: Doorbell, private val medi
         val m = ex.requestMethod
         val q = query(ex)
         when {
+            path == "/api/status" && app.bell == null -> json(ex, 200, JSONObject().put("setup", true)
+                .put("vapidKey", WebPush.encode(WebPush.rawPublic(store.vapid().public as java.security.interfaces.ECPublicKey))))
+            path == "/api/setup/scan" -> json(ex, 200, JSONArray(app.scan()))
+            path == "/api/setup" && m == "POST" -> {
+                val b = body(ex)
+                val ip = b.optString("ip").trim().ifEmpty { throw HttpError(400, "Kies of vul het adres van de deurbel in") }
+                val pw = b.optString("password").ifEmpty { throw HttpError(400, "Vul het wachtwoord in") }
+                val info = try { app.setup(ip, pw) } catch (e: HttpError) { throw e } catch (e: Exception) {
+                    throw HttpError(400, when (e) {
+                        is java.net.SocketTimeoutException, is java.net.ConnectException, is java.net.NoRouteToHostException ->
+                            "Deurbel niet bereikbaar op $ip"
+                        is javax.net.ssl.SSLException -> "Op $ip reageert geen Tapo-deurbel. Klopt het adres?"
+                        else -> if ((e.message ?: "").startsWith("Ongeldig antwoord")) "Op $ip reageert geen Tapo-deurbel. Klopt het adres?"
+                            else e.message ?: "Koppelen mislukt"
+                    })
+                }
+                json(ex, 200, JSONObject().put("ok", true).put("model", info.optString("device_model")).put("name", info.optString("device_alias")))
+            }
             path == "/api/status" -> json(ex, 200, status())
             path == "/api/settings" && m == "POST" -> {
                 val b = body(ex)

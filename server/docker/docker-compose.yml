@@ -5,12 +5,11 @@ services:
     network_mode: host
     restart: unless-stopped
     volumes:
-      - ./go2rtc.yaml:/config/go2rtc.yaml:ro
+      - ./go2rtc:/config
 
   deurbel:
     build: .
     network_mode: host
     restart: unless-stopped
-    env_file: .env
     volumes:
       - ./data:/data

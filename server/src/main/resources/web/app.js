@@ -117,6 +117,8 @@ async function refreshStatus() {
     showStageMsg('Geen verbinding met thuis. Staat Tailscale aan op je telefoon?');
     return;
   }
+  if (status.setup) { showSetup(); return; }
+  if (!$('#setup').hidden) { $('#setup').hidden = true; stopLive(); go('live'); }
   renderRecent(); renderDnd(); renderRingBanner();
   if (view === 'settings') renderSettings();
   updatePushNotice();
@@ -564,6 +566,48 @@ $('#fw-auto').onchange = async (e) => {
   catch (err) { e.target.checked = !e.target.checked; toast(err.message); }
 };
 
+// ---------- first-time setup: link the doorbell ----------
+let setupIp = null, setupShown = false;
+async function showSetup() {
+  if (setupShown) return;
+  setupShown = true; stopLive();
+  $('#setup').hidden = false;
+  const list = $('#setup-found');
+  list.innerHTML = '<div class="row"><div class="spinner" style="width:22px;height:22px;border-width:2px"></div><div class="grow"><b>Zoeken…</b><span>Dit duurt een paar seconden</span></div></div>';
+  let found = [];
+  try { found = await api('/api/setup/scan'); } catch (e) { found = []; }
+  if (!found.length) {
+    $('#setup-intro').textContent = 'Geen deurbel gevonden. Vul het adres zelf in (te vinden in de app van je router).';
+    list.hidden = true; $('#setup-manual-btn').hidden = true; $('#setup-ip').hidden = false;
+    return;
+  }
+  $('#setup-intro').textContent = found.length === 1 ? 'Gevonden! Vul je wachtwoord in om te koppelen.' : 'Kies je deurbel en vul je wachtwoord in.';
+  list.innerHTML = '';
+  found.forEach((ip, i) => {
+    const b = document.createElement('button'); b.className = 'row';
+    b.innerHTML = `<span class="ico-wrap amber">${icon('bell')}</span><div class="grow"><b>Tapo-apparaat</b><span>${ip}</span></div><span class="radio"></span>`;
+    b.onclick = () => { setupIp = ip; $$('#setup-found .row').forEach((r) => r.classList.toggle('sel', r === b)); buzz(); };
+    list.appendChild(b);
+    if (i === 0) b.click();
+  });
+}
+$('#setup-manual-btn').onclick = () => { $('#setup-ip').hidden = false; $('#setup-ip').focus(); $('#setup-manual-btn').hidden = true; };
+$('#setup-go').onclick = async () => {
+  const ip = ($('#setup-ip').hidden ? '' : $('#setup-ip').value.trim()) || setupIp;
+  const pw = $('#setup-pw').value;
+  const err = $('#setup-err'); err.hidden = true;
+  if (!ip) { err.textContent = 'Kies je deurbel of vul het adres in'; err.hidden = false; return; }
+  if (!pw) { err.textContent = 'Vul je wachtwoord in'; err.hidden = false; return; }
+  const btn = $('#setup-go'); btn.disabled = true; btn.textContent = 'Koppelen…';
+  try {
+    const r = await post('/api/setup', { ip, password: pw });
+    buzz(40); btn.textContent = `Gekoppeld met ${r.model || 'je deurbel'} ✓`;
+    setTimeout(() => { setupShown = false; $('#setup').hidden = true; refreshStatus(); go('live'); showOnboard(false); }, 1500);
+  } catch (e) {
+    err.textContent = e.message; err.hidden = false; btn.disabled = false; btn.textContent = 'Koppelen';
+  }
+};
+
 // ---------- theme ----------
 function applyTheme(t) {
   const root = document.documentElement;
@@ -583,7 +627,7 @@ matchMedia('(prefers-color-scheme: dark)').addEventListener('change', () => appl
 let installPrompt = null;
 addEventListener('beforeinstallprompt', (e) => { e.preventDefault(); installPrompt = e; });
 function showOnboard(force) {
-  if (standalone) return;
+  if (standalone || !$('#setup').hidden) return;
   if (!force && localStorage.getItem('onboarded')) return;
   const steps = isIos
     ? [`Tik onderin Safari op ${icon('shareIos')} <b>Deel</b>`, `Kies ${icon('plusSquare')} <b>Zet op beginscherm</b>`, 'Open <b>Deurbel</b> vanaf je beginscherm']

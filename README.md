@@ -24,17 +24,18 @@ Beide telefoons gebruiken een web-app op het beginscherm (geen App Store nodig).
 
 **Benodigd (± €100):** Raspberry Pi 5 (4 GB), officiële 27 W voeding, microSD 64 GB (A2), behuizing met ventilator, netwerkkabel.
 
-**Installeren**
-1. Zet *Raspberry Pi OS Lite (64-bit)* op de microSD met *Raspberry Pi Imager* (zet daarin SSH aan, gebruikersnaam/wachtwoord).
-2. Maak een gratis account op [tailscale.com](https://tailscale.com) en zet in de beheeromgeving onder **DNS** *MagicDNS* en *HTTPS Certificates* aan.
-3. Log via SSH in op de Pi en voer uit:
+**Installeren (± 15 minuten)**
+1. Installeer de **Tailscale-app** op je telefoon en maak daarin een gratis account.
+2. Open op de Pi een **Terminal** (Raspberry-menu → Accessoires → Terminal) en typ:
    ```
    curl -fsSL https://github.com/TK800m/TestMe/releases/download/deurbel-latest/install.sh | bash
    ```
-   Vul het IP-adres van de deurbel en je TP-Link-wachtwoord in, en log in bij Tailscale via de link die verschijnt.
-4. Installeer de **Tailscale-app** op beide telefoons (zelfde account of deel de Pi met je partner) en open het adres dat het script toont.
-5. iPhone: Safari → *Deel* → *Zet op beginscherm*. Android: Chrome → menu → *Toevoegen aan startscherm*.
-   Open de app vanaf het beginscherm → *Instellingen* → **Meldingen aanzetten**.
+3. Er verschijnt een QR-code: scan die met je telefoon en log in bij Tailscale (zelfde account).
+   Krijg je een link om HTTPS aan te zetten: open die en klik *Enable*.
+4. Aan het eind verschijnt weer een QR-code: scan die (Tailscale aan) → de app opent.
+5. De app vindt de deurbel zelf: vul alleen je **Tapo-wachtwoord** in en tik op **Koppelen**.
+6. Zet de app op je beginscherm (iPhone: Safari → *Deel* → *Zet op beginscherm*;
+   Android: Chrome → ⋮ → *App installeren*) en tik in Instellingen op **Meldingen aanzetten**.
 
 **Wat kan de web-app:** live beeld met geluid, praten, snelle antwoorden (Nederlandse stem of eigen stem),
 opnames terugkijken/downloaden/verwijderen, gong en meldingen aan/uit, ook buitenshuis via Tailscale.

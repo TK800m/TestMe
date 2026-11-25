@@ -220,6 +220,21 @@
   </div>
 </div>
 
+<div class="onboard setup" id="setup" hidden>
+  <div class="onboard-card">
+    <img src="/icon-192.png" alt="" class="app-ico">
+    <h2>Koppel je deurbel</h2>
+    <p id="setup-intro">We zoeken je Tapo-deurbel op het thuisnetwerk…</p>
+    <div class="card setup-list" id="setup-found"></div>
+    <button class="btn text small" id="setup-manual-btn">Adres zelf invullen</button>
+    <input id="setup-ip" placeholder="Bijv. 192.168.1.50" inputmode="decimal" hidden>
+    <input id="setup-pw" type="password" placeholder="Tapo-wachtwoord" autocomplete="current-password">
+    <p class="foot" style="margin:6px 4px 0;text-align:left">Hetzelfde wachtwoord als waarmee je inlogt in de Tapo-app.</p>
+    <button class="btn wide" id="setup-go">Koppelen</button>
+    <p class="setup-err" id="setup-err" hidden></p>
+  </div>
+</div>
+
 <div class="onboard" id="onboard" hidden>
   <div class="onboard-card">
     <img src="/icon-192.png" alt="" class="app-ico">

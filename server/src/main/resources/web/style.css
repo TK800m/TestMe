@@ -214,3 +214,16 @@ textarea { width: 100%; font: inherit; font-size: 18px; color: var(--text); back
 .progress i { display: block; height: 100%; width: 0; background: var(--accent); border-radius: 4px; transition: width .6s ease; }
 .progress.indet i { width: 35% !important; animation: indet 1.3s ease-in-out infinite; }
 @keyframes indet { from { transform: translateX(-100%); } to { transform: translateX(300%); } }
+
+/* ---------- first-time setup ---------- */
+.onboard.setup { z-index: 75; overflow-y: auto; }
+.setup .onboard-card { width: 100%; }
+.setup-list { margin: 0 0 6px; text-align: left; }
+.setup-list .row .radio { width: 22px; height: 22px; border-radius: 50%; border: 2px solid var(--muted); flex: none; }
+.setup-list .row.sel .radio { border: 7px solid var(--accent); }
+.setup input { width: 100%; font: inherit; font-size: 17px; color: var(--text); background: var(--surface); border: 1px solid var(--line);
+  border-radius: 14px; padding: 14px; margin-top: 10px; outline: none; }
+.setup input:focus { border-color: var(--accent); }
+.setup .btn.wide { width: 100%; margin: 16px 0 0; }
+.setup .btn:disabled { opacity: .7; }
+.setup .setup-err { color: var(--red); font-size: 14px; margin: 12px 0 0; }
