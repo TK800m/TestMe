@@ -73,6 +73,35 @@ class DoorbellService : Service() {
         }
     }
 
+    private var lastPower: nl.tapo.deurbel.core.PowerInfo? = null
+    private var lastPowerCheck = 0L
+
+    /** Warns when the battery is almost empty or the doorbell stops getting mains power. */
+    private fun checkPower(c: nl.tapo.deurbel.core.TapoClient) {
+        val p = try { c.power() } catch (_: Exception) { return }
+        val before = lastPower
+        lastPower = p
+        if (before?.external == true && p.external == false) {
+            notifyInfo(3, "Deurbel krijgt geen stroom meer",
+                "De deurbel draait nu op de batterij" + (p.percent?.let { " ($it%)" } ?: "") + ". Controleer de netvoeding.")
+        }
+        if (p.low && p.charging != true) {
+            val sp = getSharedPreferences("deurbel", MODE_PRIVATE)
+            if (System.currentTimeMillis() - sp.getLong("low_batt", 0) > 12 * 3600_000L) {
+                sp.edit().putLong("low_batt", System.currentTimeMillis()).apply()
+                notifyInfo(4, "Batterij deurbel bijna leeg", "Nog ${p.percent}%. Laad de deurbel op of controleer de netvoeding.")
+            }
+        }
+    }
+
+    private fun notifyInfo(id: Int, title: String, text: String) {
+        val n = NotificationCompat.Builder(this, DeurbelApp.CH_RING)
+            .setSmallIcon(R.drawable.ic_stat_bell).setContentTitle(title).setContentText(text)
+            .setStyle(NotificationCompat.BigTextStyle().bigText(text))
+            .setSilent(true).setAutoCancel(true).setContentIntent(openApp(false)).build()
+        try { getSystemService(NotificationManager::class.java).notify(id, n) } catch (_: SecurityException) { }
+    }
+
     private suspend fun pollLoop() {
         val seen = HashMap<String, Long>()
         var primed = false
@@ -94,7 +123,8 @@ class DoorbellService : Service() {
                 }
                 seen.entries.removeIf { it.value < camNow - 900 }
                 primed = true
-                setStatus("Luistert naar de deurbel")
+                if (System.currentTimeMillis() - lastPowerCheck > 5 * 60_000) { lastPowerCheck = System.currentTimeMillis(); checkPower(c) }
+                setStatus("Luistert naar de deurbel" + (lastPower?.takeIf { it.hasBattery }?.let { " · batterij ${it.percent}%" } ?: ""))
                 delay(POLL_MS)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e

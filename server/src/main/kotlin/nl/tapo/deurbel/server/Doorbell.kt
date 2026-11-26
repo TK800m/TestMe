@@ -13,6 +13,9 @@ class Doorbell(private val host: String, private val password: String, private v
         private set
     @Volatile var lastOk: Long = 0
         private set
+    @Volatile var power: nl.tapo.deurbel.core.PowerInfo? = null
+        private set
+    private var lastPowerCheck = 0L
     @Volatile var audioUlaw = false
     @Volatile var audioRate = 8000
     private val pushPool = Executors.newFixedThreadPool(4)
@@ -63,6 +66,7 @@ class Doorbell(private val host: String, private val password: String, private v
                 seen.entries.removeIf { it.value < camNow - 900 }
                 primed = true
                 checkDndExpired()
+                if (System.currentTimeMillis() - lastPowerCheck > 5 * 60_000) { lastPowerCheck = System.currentTimeMillis(); checkPower(c) }
                 status = "Verbonden"
                 lastOk = System.currentTimeMillis()
                 Thread.sleep(2500)
@@ -71,6 +75,27 @@ class Doorbell(private val host: String, private val password: String, private v
                 Log.w("Deurbel: ${e.message}")
                 if (e is TapoException) reset()
                 Thread.sleep(10_000)
+            }
+        }
+    }
+
+    // ---- batterij / stroom ----
+    private fun checkPower(c: nl.tapo.deurbel.core.TapoClient) {
+        val p = try { c.power() } catch (e: Exception) { return }
+        val before = power
+        power = p
+        val now = System.currentTimeMillis()
+        if (before?.external == true && p.external == false) {
+            Log.w("Netvoeding van de deurbel weggevallen")
+            notifyAll(JSONObject().put("title", "Deurbel krijgt geen stroom meer").put("body",
+                "De deurbel draait nu op de batterij" + (p.percent?.let { " ($it%)" } ?: "") + ". Controleer de netvoeding.").put("url", "/"))
+        }
+        if (p.low && p.charging != true) {
+            val last = store.getString("low_battery_notified")?.toLongOrNull() ?: 0
+            if (now - last > 12 * 3600_000L) {
+                store.putString("low_battery_notified", now.toString())
+                notifyAll(JSONObject().put("title", "Batterij deurbel bijna leeg").put("body",
+                    "Nog ${p.percent}%. Laad de deurbel op of controleer de netvoeding.").put("url", "/"))
             }
         }
     }

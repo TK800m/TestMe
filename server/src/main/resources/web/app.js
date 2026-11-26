@@ -30,6 +30,7 @@ const ICONS = {
   plusSquare: '<rect x="3" y="3" width="18" height="18" rx="2"/><path d="M12 8v8M8 12h8"/>',
   person: '<circle cx="12" cy="8" r="4"/><path d="M4 21a8 8 0 0 1 16 0"/>',
   loader: '<path d="M21 12a9 9 0 1 1-6.2-8.6"/>',
+  battery: '<rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M22 11v2"/>',
   sun: '<circle cx="12" cy="12" r="4"/><path d="M12 2v2M12 20v2M4.9 4.9l1.4 1.4M17.7 17.7l1.4 1.4M2 12h2M20 12h2M4.9 19.1l1.4-1.4M17.7 6.3l1.4-1.4"/>',
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
@@ -119,7 +120,7 @@ async function refreshStatus() {
   }
   if (status.setup) { showSetup(); return; }
   if (!$('#setup').hidden) { $('#setup').hidden = true; stopLive(); go('live'); }
-  renderRecent(); renderDnd(); renderRingBanner();
+  renderRecent(); renderDnd(); renderRingBanner(); renderPower();
   if (view === 'settings') renderSettings();
   updatePushNotice();
 }
@@ -142,6 +143,34 @@ function renderRingBanner() {
   const fresh = r && Date.now() / 1000 - r.time < 180;
   $('#ring-banner').hidden = !fresh;
   if (fresh) $('#ring-when').textContent = `${hhmm(r.time)} · ${ago(r.time).toLowerCase()}`;
+}
+
+function batteryIcon(pct, charging) {
+  const w = Math.max(1, Math.round(12 * (pct ?? 100) / 100));
+  return `<svg viewBox="0 0 24 24"><rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M22 11v2"/>` +
+    (charging ? '<path d="m11 8.5-2.5 4h3l-2 3" stroke-width="1.8"/>' : `<rect x="4.5" y="9.5" width="${w}" height="5" rx="1" fill="currentColor" stroke="none"/>`) + '</svg>';
+}
+function renderPower() {
+  const p = status && status.power;
+  const pill = $('#batt-pill');
+  if (!p) { pill.hidden = true; $('#batt-sub').textContent = 'Nog niet bekend'; $('#batt-pct').textContent = ''; return; }
+  const hasBatt = p.percent !== null;
+  const problem = hasBatt && p.external === false && !p.charging;
+  pill.hidden = !hasBatt;
+  pill.classList.toggle('low', !!p.low);
+  pill.innerHTML = hasBatt ? `${batteryIcon(p.percent, p.charging)}<span>${p.percent}%</span>` : '';
+  let sub;
+  if (!hasBatt) sub = 'Gevoed door netvoeding';
+  else if (p.full) sub = 'Volledig opgeladen';
+  else if (p.charging) sub = 'Laadt op via netvoeding';
+  else if (p.external === true) sub = 'Netvoeding aangesloten';
+  else if (p.external === false) sub = p.low ? 'Bijna leeg – laad op of controleer de netvoeding' : 'Op batterij – netvoeding niet actief';
+  else sub = p.low ? 'Bijna leeg – opladen' : 'Batterij';
+  $('#batt-sub').textContent = sub;
+  $('#batt-pct').textContent = hasBatt ? `${p.percent}%` : '';
+  const ico = $('#batt-ico');
+  ico.className = 'ico-wrap ' + (p.low ? 'red' : problem ? 'amber' : 'green');
+  ico.innerHTML = batteryIcon(p.percent, p.charging);
 }
 
 function renderDnd() {

@@ -142,6 +142,24 @@ class TapoClient(val host: String, private val cloudPassword: String, private va
             .optJSONObject("harddisk_manage")?.optJSONArray("hd_info")
     } catch (e: TapoException) { null }
 
+    // ---- battery / power ----
+    /**
+     * Battery and power information. Different Tapo models report this in different
+     * places, so everything is collected and interpreted by [PowerInfo.from].
+     */
+    fun power(): PowerInfo {
+        val parts = JSONObject()
+        try { parts.put("basic_info", deviceInfo()) } catch (_: Exception) {}
+        fun opt(name: String, method: String, params: JSONObject, vararg path: String) = try {
+            var o: JSONObject? = execute(method, params)
+            for (k in path) o = o?.optJSONObject(k)
+            o?.let { parts.put(name, it) }
+        } catch (_: TapoException) { }
+        opt("battery_status", "getBatteryStatus", JSONObject().put("battery", JSONObject().put("name", "status")), "battery", "status")
+        opt("power_mode", "getPowerMode", JSONObject().put("battery", JSONObject().put("name", "power")), "battery", "power")
+        return PowerInfo.from(parts)
+    }
+
     // ---- firmware ----
     /** Asks the doorbell to check TP-Link for new firmware; returns the camera's upgrade_info. */
     fun checkFirmware(): JSONObject {

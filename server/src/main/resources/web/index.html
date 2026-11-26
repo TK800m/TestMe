@@ -24,7 +24,10 @@
     <div id="player" class="player"></div>
     <div class="stage-top">
       <span class="pill" id="live-pill"><i class="pulse"></i><span>Verbinden…</span></span>
-      <button class="icon-btn glass" id="btn-full" aria-label="Volledig scherm"><svg data-i="maximize"></svg></button>
+      <div class="stage-right">
+        <span class="pill batt" id="batt-pill" hidden></span>
+        <button class="icon-btn glass" id="btn-full" aria-label="Volledig scherm"><svg data-i="maximize"></svg></button>
+      </div>
     </div>
     <div class="stage-msg" id="stage-msg" hidden>
       <svg data-i="wifiOff" class="big-ico"></svg>
@@ -117,6 +120,11 @@
       <div class="grow"><b>Gong</b><span id="chime-sub">Belgeluid in huis</span></div>
       <input type="checkbox" class="toggle" id="set-chime">
     </label>
+    <div class="row" id="set-batt">
+      <span class="ico-wrap green" id="batt-ico"><svg data-i="battery"></svg></span>
+      <div class="grow"><b>Batterij</b><span id="batt-sub">Wordt opgehaald…</span></div>
+      <span class="meta" id="batt-pct"></span>
+    </div>
     <button class="row" id="set-dnd">
       <span class="ico-wrap moon"><svg data-i="moon"></svg></span>
       <div class="grow"><b>Niet storen</b><span id="dnd-sub2">Uit</span></div>

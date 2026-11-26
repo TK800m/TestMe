@@ -219,6 +219,7 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
                 bell.client().setAutoUpgrade(body(ex).getBoolean("on"))
                 json(ex, 200, JSONObject().put("ok", true))
             }
+            path == "/api/power" -> json(ex, 200, bell.client().power().toJson())
             path == "/api/days" -> {
                 val end = Calendar.getInstance(); val start = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -90) }
                 val days = bell.client().recordingDays(dayFmt.format(start.time), dayFmt.format(end.time)).distinct().sortedDescending()
@@ -299,6 +300,7 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
             .put("vapidKey", WebPush.encode(WebPush.rawPublic(store.vapid().public as java.security.interfaces.ECPublicKey)))
             .put("devices", store.subscriptions().size)
             .put("dndUntil", if (bell.dndActive()) bell.dndUntil() / 1000 else 0)
+            .put("power", bell.power?.toJson()?.also { it.remove("raw") } ?: JSONObject.NULL)
     }
 
     private fun replies() = JSONArray(store.replies().map {

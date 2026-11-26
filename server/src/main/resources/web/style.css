@@ -227,3 +227,8 @@ textarea { width: 100%; font: inherit; font-size: 18px; color: var(--text); back
 .setup .btn.wide { width: 100%; margin: 16px 0 0; }
 .setup .btn:disabled { opacity: .7; }
 .setup .setup-err { color: var(--red); font-size: 14px; margin: 12px 0 0; }
+
+/* ---------- battery ---------- */
+.stage-right { display: flex; align-items: center; gap: 8px; }
+.pill.batt svg { width: 20px; height: 20px; }
+.pill.batt.low { background: rgba(255,69,58,.85); }

@@ -26,6 +26,9 @@ import androidx.compose.foundation.rememberScrollState
 import androidx.compose.foundation.shape.CircleShape
 import androidx.compose.foundation.verticalScroll
 import androidx.compose.material.icons.Icons
+import androidx.compose.material.icons.filled.BatteryAlert
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatteryFull
 import androidx.compose.material.icons.filled.Mic
 import androidx.compose.material.icons.filled.Refresh
 import androidx.compose.material.icons.filled.VolumeOff
@@ -132,6 +135,10 @@ fun LiveScreen() {
         onDispose { p.release(); player = null; visitor.release() }
     }
 
+    var power by remember { mutableStateOf<nl.tapo.deurbel.core.PowerInfo?>(null) }
+    LaunchedEffect(Unit) {
+        power = withContext(Dispatchers.IO) { try { Camera.client(ctx).power() } catch (_: Exception) { null } }
+    }
     LaunchedEffect(Unit) {
         chime = withContext(Dispatchers.IO) {
             try { Camera.client(ctx).chimeRingPlan()?.optString("enabled")?.let { it == "on" } } catch (_: Exception) { null }
@@ -156,6 +163,22 @@ fun LiveScreen() {
                     } catch (e: Exception) { message = "Gong wijzigen mislukt: ${Camera.friendly(e)}" }
                 }
             })
+        }
+
+        power?.takeIf { it.hasBattery || it.external != null }?.let { p ->
+            val warn = p.low || (p.hasBattery && p.external == false && p.charging != true)
+            Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 2.dp), verticalAlignment = Alignment.CenterVertically) {
+                Icon(
+                    when { p.charging == true -> Icons.Filled.BatteryChargingFull; p.low -> Icons.Filled.BatteryAlert; else -> Icons.Filled.BatteryFull },
+                    null, tint = if (p.low) MaterialTheme.colorScheme.error else if (warn) Color(0xFFF5A524) else Color(0xFF30D158)
+                )
+                Spacer(Modifier.width(8.dp))
+                Text(
+                    "Batterij " + p.label() + if (warn) " – controleer de netvoeding" else "",
+                    style = MaterialTheme.typography.bodyMedium,
+                    color = if (p.low) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground
+                )
+            }
         }
 
         Box(Modifier.fillMaxWidth().height(300.dp).background(Color.Black), contentAlignment = Alignment.Center) {
