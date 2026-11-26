@@ -410,22 +410,31 @@ async function renderSettings() {
   $('#chime-sub').textContent = status.chime === null ? 'Niet beschikbaar' : (status.dndUntil ? 'Stil door Niet storen' : 'Belgeluid in huis');
   $('#devices-sub').textContent = `${status.devices} telefoon${status.devices === 1 ? '' : 's'} gekoppeld`;
   const types = $('#types');
-  if (!status.seenTypes.length) {
-    types.innerHTML = '<div class="empty">Bel één keer aan, dan verschijnen hier de soorten gebeurtenissen.</div>';
+  const list = status.types || [];
+  if (!list.length) {
+    types.innerHTML = '<div class="empty">Nog geen gebeurtenissen gezien. Tik hierboven op "Aanbellen herkennen".</div>';
     $('#types-foot').textContent = '';
   } else {
     types.innerHTML = '';
-    status.seenTypes.forEach((t, i) => {
-      const l = document.createElement('label'); l.className = 'row';
-      l.innerHTML = `<span class="ico-wrap grey">${icon('bell')}</span><div class="grow"><b>Gebeurtenis type ${t}</b></div>
-        <input type="checkbox" class="toggle" ${status.ringTypes.includes(t) ? 'checked' : ''}>`;
-      $('input', l).onchange = async (e) => {
-        const set = new Set(status.ringTypes); e.target.checked ? set.add(t) : set.delete(t);
-        status = await post('/api/settings', { ringTypes: [...set] });
+    const labelIcon = { ring: 'bell', person: 'person', motion: 'video', package: 'download', vehicle: 'send', pet: 'person', other: 'message' };
+    list.forEach((t) => {
+      const row = document.createElement('div'); row.className = 'row';
+      const opts = Object.entries(status.labelNames || {}).map(([k, v]) => `<option value="${k}" ${t.label === k ? 'selected' : ''}>${v}</option>`).join('');
+      row.innerHTML = `<span class="ico-wrap ${t.label === 'ring' ? 'amber' : 'grey'}">${icon(labelIcon[t.label] || 'bell')}</span>
+        <label class="grow type-name"><b></b><span></span>
+          <select aria-label="Naam kiezen"><option value="" ${t.label ? '' : 'selected'} disabled>Kies een naam…</option>${opts}</select></label>
+        <input type="checkbox" class="toggle" ${t.notify ? 'checked' : ''} aria-label="Melding">`;
+      $('b', row).textContent = t.name; $('span:not(.ico-wrap)', row).textContent = t.desc;
+      $('select', row).onchange = async (e) => { buzz(); try { status = await post('/api/types/label', { type: t.type, label: e.target.value }); renderSettings(); } catch (err) { toast(err.message); } };
+      $('input', row).onchange = async (e) => {
+        buzz(); const set = new Set(list.filter((x) => x.notify).map((x) => x.type)); e.target.checked ? set.add(t.type) : set.delete(t.type);
+        status = await post('/api/settings', { ringTypes: [...set] }); renderSettings();
       };
-      types.appendChild(l);
+      types.appendChild(row);
     });
-    $('#types-foot').textContent = 'Niets aan = melding bij elke gebeurtenis (ook beweging). Zet alleen het type van de bel aan voor minder meldingen.';
+    $('#types-foot').textContent = list.some((x) => x.notify)
+      ? 'Je krijgt alleen een melding bij wat aan staat. Tik op een naam om die te wijzigen.'
+      : 'Nu krijg je bij álle gebeurtenissen een melding (ook beweging). Zet alleen Aanbellen aan voor minder meldingen.';
   }
   $('#about').textContent = status.connected ? 'Verbonden met de deurbel' : status.status;
 }
@@ -528,6 +537,22 @@ $('#edit-delete').onclick = async () => {
   setTimeout(async () => { if (!undone) { try { replies = await api(`/api/replies/${r.id}`, { method: 'DELETE' }); renderReplyList(); } catch (e) { toast(e.message); } } }, 5200);
 };
 $('#reply-add').onclick = () => { buzz(); openEditor(null); };
+
+// ---------- learn which event is the doorbell button ----------
+$('#learn-btn').onclick = async () => {
+  buzz(30);
+  const btn = $('#learn-btn'); btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;border-top-color:currentColor"></div>Luisteren… druk nu op de bel';
+  $('#learn-hint').textContent = 'Loop naar de deur en druk één keer op de bel. Je hebt 90 seconden.';
+  try {
+    status = await post('/api/learn');
+    if (status.learned) { toast('Gelukt! Aanbellen is herkend'); buzz(60);
+      $('#learn-hint').textContent = 'Aanbellen is herkend. Je krijgt nu alleen een melding als er wordt aangebeld.'; }
+    else $('#learn-hint').textContent = 'Er is geen aanbelling gezien. Probeer het nog eens.';
+  } catch (e) { $('#learn-hint').textContent = 'Herkennen lukte niet: ' + e.message; }
+  btn.disabled = false; btn.innerHTML = icon('bell') + 'Aanbellen herkennen';
+  renderSettings();
+};
 
 // ---------- firmware ----------
 let fw = null, fwPoll = null;

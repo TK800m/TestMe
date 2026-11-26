@@ -7,6 +7,7 @@ import android.net.Uri
 import android.os.Build
 import android.os.PowerManager
 import android.provider.Settings
+import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -63,6 +64,9 @@ fun SettingsScreen(onSaved: () -> Unit, theme: String = "system", onTheme: (Stri
     var found by remember { mutableStateOf<List<String>>(emptyList()) }
     var scanning by remember { mutableStateOf(false) }
     var ringTypes by remember { mutableStateOf(prefs.ringTypes) }
+    var typeLabels by remember { mutableStateOf(prefs.typeLabels) }
+    var learning by remember { mutableStateOf(false) }
+    var learnText by remember { mutableStateOf<String?>(null) }
     var advanced by remember { mutableStateOf(prefs.rtspUser.isNotBlank()) }
     var fwText by remember { mutableStateOf<String?>(null) }
     var fwNew by remember { mutableStateOf<String?>(null) }
@@ -140,16 +144,73 @@ fun SettingsScreen(onSaved: () -> Unit, theme: String = "system", onTheme: (Stri
                 ctx.startActivity(Intent(Settings.ACTION_MANAGE_APP_USE_FULL_SCREEN_INTENT, Uri.parse("package:${ctx.packageName}")))
             }) { Text("Volledig scherm bij aanbellen toestaan") }
         }
-        val seen = prefs.seenTypes.sorted()
+        // ---- which events give a notification (human readable) ----
+        Text("Waarvoor wil je een melding?", style = MaterialTheme.typography.titleSmall)
+        Text("De deurbel geeft gebeurtenissen alleen als nummer door. Laat de app één keer leren welke het aanbellen is.",
+            style = MaterialTheme.typography.bodySmall)
+        Button(modifier = Modifier.fillMaxWidth(), enabled = !learning && prefs.configured, onClick = {
+            learning = true; learnText = "Loop nu naar de deur en druk één keer op de bel (je hebt 90 seconden)…"
+            scope.launch {
+                learnText = try {
+                    withContext(Dispatchers.IO) {
+                        val c = Camera.client(ctx)
+                        val corr = c.timeCorrection()
+                        val startCam = System.currentTimeMillis() / 1000 - corr - 5
+                        val candidates = linkedSetOf<String>()
+                        var firstSeen = 0L
+                        val until = System.currentTimeMillis() + 90_000
+                        while (System.currentTimeMillis() < until) {
+                            val camNow = System.currentTimeMillis() / 1000 - corr
+                            c.events(startCam, camNow + 60).filter { it.startTime >= startCam && it.type.isNotEmpty() }
+                                .forEach { if (candidates.add(it.type) && firstSeen == 0L) firstSeen = System.currentTimeMillis() }
+                            if (firstSeen > 0 && System.currentTimeMillis() - firstSeen > 10_000) break
+                            Thread.sleep(2000)
+                        }
+                        val labels = prefs.typeLabels
+                        val ring = nl.tapo.deurbel.core.EventTypes.pickRing(candidates, prefs.typeStats, labels)
+                        if (ring == null) "Er is geen aanbelling gezien. Probeer het nog eens."
+                        else {
+                            labels.keys().asSequence().toList().forEach { if (labels.optString(it) == "ring") labels.remove(it) }
+                            labels.put(ring, "ring")
+                            prefs.typeLabels = labels
+                            prefs.seenTypes = prefs.seenTypes + candidates
+                            prefs.ringTypes = setOf(ring)
+                            "Gelukt! Aanbellen is herkend. Je krijgt nu alleen een melding als er wordt aangebeld."
+                        }
+                    }
+                } catch (e: Exception) { "Herkennen lukte niet: ${Camera.friendly(e)}" }
+                ringTypes = prefs.ringTypes; typeLabels = prefs.typeLabels; learning = false
+            }
+        }) { Text(if (learning) "Bezig met luisteren…" else "Aanbellen herkennen") }
+        learnText?.let { Text(it, style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary) }
+
+        val stats = remember(learning) { prefs.typeStats }
+        val seen = (prefs.seenTypes + stats.keys().asSequence().toList()).sortedWith(
+            compareBy({ if (typeLabels.optString(it) == "ring") 0 else 1 }, { -(stats.optJSONObject(it)?.optInt("n") ?: 0) }))
         if (seen.isNotEmpty()) {
-            Text("Melden bij gebeurtenistype (niets aangevinkt = alles):", style = MaterialTheme.typography.bodySmall)
+            Text(if (ringTypes.isEmpty()) "Nu krijg je bij álle gebeurtenissen een melding. Vink aan waarvoor je er een wilt:"
+                else "Melding bij de aangevinkte gebeurtenissen. Tik op een naam om die te wijzigen.",
+                style = MaterialTheme.typography.bodySmall)
             seen.forEach { t ->
+                var menu by remember { mutableStateOf(false) }
                 Row(verticalAlignment = Alignment.CenterVertically) {
                     Checkbox(checked = t in ringTypes, onCheckedChange = { on ->
                         ringTypes = if (on) ringTypes + t else ringTypes - t
                         prefs.ringTypes = ringTypes
                     })
-                    Text("Type $t")
+                    Column(Modifier.weight(1f).clickable { menu = true }.padding(vertical = 6.dp)) {
+                        Text(nl.tapo.deurbel.core.EventTypes.name(t, typeLabels), style = MaterialTheme.typography.bodyLarge)
+                        Text(nl.tapo.deurbel.core.EventTypes.describe(stats, t), style = MaterialTheme.typography.bodySmall)
+                        androidx.compose.material3.DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
+                            nl.tapo.deurbel.core.EventTypes.LABELS.forEach { (key, name) ->
+                                androidx.compose.material3.DropdownMenuItem(text = { Text(name) }, onClick = {
+                                    val l = prefs.typeLabels
+                                    if (key == "ring") l.keys().asSequence().toList().forEach { if (l.optString(it) == "ring") l.remove(it) }
+                                    l.put(t, key); prefs.typeLabels = l; typeLabels = l; menu = false
+                                })
+                            }
+                        }
+                    }
                 }
             }
         }

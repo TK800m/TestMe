@@ -232,3 +232,8 @@ textarea { width: 100%; font: inherit; font-size: 18px; color: var(--text); back
 .stage-right { display: flex; align-items: center; gap: 8px; }
 .pill.batt svg { width: 20px; height: 20px; }
 .pill.batt.low { background: rgba(255,69,58,.85); }
+
+/* ---------- event types ---------- */
+.type-name { position: relative; cursor: pointer; }
+.type-name select { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; font-size: 16px; }
+#learn-btn:disabled { opacity: .85; }

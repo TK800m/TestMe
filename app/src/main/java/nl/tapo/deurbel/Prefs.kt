@@ -35,6 +35,16 @@ class Prefs(context: Context) {
         get() = sp.getStringSet("ring_types", emptySet()) ?: emptySet()
         set(v) = sp.edit().putStringSet("ring_types", v).apply()
 
+    /** Per event type: how often and when it was last seen (JSON). */
+    var typeStats: org.json.JSONObject
+        get() = org.json.JSONObject(sp.getString("type_stats", "{}") ?: "{}")
+        set(v) = sp.edit().putString("type_stats", v.toString()).apply()
+
+    /** Per event type: label key chosen by the user or learnt (JSON, see EventTypes.LABELS). */
+    var typeLabels: org.json.JSONObject
+        get() = org.json.JSONObject(sp.getString("type_labels", "{}") ?: "{}")
+        set(v) = sp.edit().putString("type_labels", v.toString()).apply()
+
     var seenTypes: Set<String>
         get() = sp.getStringSet("seen_types", emptySet()) ?: emptySet()
         set(v) = sp.edit().putStringSet("seen_types", v).apply()

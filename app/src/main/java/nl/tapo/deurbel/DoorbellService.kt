@@ -117,8 +117,9 @@ class DoorbellService : Service() {
                     if (seen.containsKey(key)) continue
                     seen[key] = e.startTime
                     if (e.type.isNotEmpty() && e.type !in prefs.seenTypes) prefs.seenTypes = prefs.seenTypes + e.type
+                    if (e.type.isNotEmpty()) prefs.typeStats = nl.tapo.deurbel.core.EventTypes.record(prefs.typeStats, e.type, e.startTime + corr)
                     if (primed && (prefs.ringTypes.isEmpty() || e.type in prefs.ringTypes)) {
-                        notifyRing(e.startTime + corr)
+                        notifyRing(e.startTime + corr, e.type)
                     }
                 }
                 seen.entries.removeIf { it.value < camNow - 900 }
@@ -156,10 +157,15 @@ class DoorbellService : Service() {
             .setContentIntent(openApp(false))
             .build()
 
-    private fun notifyRing(whenSec: Long) {
+    private fun notifyRing(whenSec: Long, type: String) {
+        val label = Prefs(this).typeLabels.optString(type)
         val b = NotificationCompat.Builder(this, DeurbelApp.CH_RING)
             .setSmallIcon(R.drawable.ic_stat_bell)
-            .setContentTitle("Er staat iemand voor de deur")
+            .setContentTitle(when (label) {
+                "ring" -> "Er wordt aangebeld"
+                "", "person" -> "Er staat iemand voor de deur"
+                else -> nl.tapo.deurbel.core.EventTypes.LABELS[label] ?: "Er staat iemand voor de deur"
+            })
             .setContentText("Tik om te kijken wie het is")
             .setWhen(whenSec * 1000)
             .setShowWhen(true)

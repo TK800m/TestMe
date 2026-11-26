@@ -219,6 +219,15 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
                 bell.client().setAutoUpgrade(body(ex).getBoolean("on"))
                 json(ex, 200, JSONObject().put("ok", true))
             }
+            path == "/api/types/label" && m == "POST" -> {
+                val b = body(ex)
+                bell.setLabel(b.getString("type"), b.getString("label"))
+                json(ex, 200, status())
+            }
+            path == "/api/learn" && m == "POST" -> {
+                val ring = bell.learnRing()
+                json(ex, 200, status().put("learned", ring ?: JSONObject.NULL))
+            }
             path == "/api/power" -> json(ex, 200, bell.client().power().toJson())
             path == "/api/days" -> {
                 val end = Calendar.getInstance(); val start = Calendar.getInstance().apply { add(Calendar.DAY_OF_YEAR, -90) }
@@ -296,11 +305,23 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
             .put("chime", chime ?: JSONObject.NULL)
             .put("rings", recent)
             .put("seenTypes", JSONArray(store.stringSet("seen_types").sorted()))
+            .put("types", JSONArray(typeList()))
+            .put("labelNames", JSONObject(nl.tapo.deurbel.core.EventTypes.LABELS as Map<*, *>))
             .put("ringTypes", JSONArray(store.stringSet("ring_types").sorted()))
             .put("vapidKey", WebPush.encode(WebPush.rawPublic(store.vapid().public as java.security.interfaces.ECPublicKey)))
             .put("devices", store.subscriptions().size)
             .put("dndUntil", if (bell.dndActive()) bell.dndUntil() / 1000 else 0)
             .put("power", bell.power?.toJson()?.also { it.remove("raw") } ?: JSONObject.NULL)
+    }
+
+    private fun typeList(): List<JSONObject> {
+        val stats = bell.typeStats(); val labels = bell.typeLabels(); val notify = store.stringSet("ring_types")
+        val all = (store.stringSet("seen_types") + stats.keys().asSequence().toList()).distinct()
+        return all.sortedWith(compareBy({ if (labels.optString(it) == "ring") 0 else 1 }, { -(stats.optJSONObject(it)?.optInt("n") ?: 0) }))
+            .map { t ->
+                JSONObject().put("type", t).put("label", labels.optString(t)).put("name", nl.tapo.deurbel.core.EventTypes.name(t, labels))
+                    .put("desc", nl.tapo.deurbel.core.EventTypes.describe(stats, t)).put("notify", t in notify)
+            }
     }
 
     private fun replies() = JSONArray(store.replies().map {
