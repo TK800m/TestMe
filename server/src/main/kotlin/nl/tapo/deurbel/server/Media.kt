@@ -11,8 +11,8 @@ import java.util.concurrent.ConcurrentHashMap
 import java.util.concurrent.TimeUnit
 
 /** Clips, text-to-speech and speaker playback (uses ffmpeg, piper / espeak-ng). */
-class Media(private val dataDir: File, private val bell: Doorbell, private val store: Store) {
-    private val clipDir = File(dataDir, "clips").apply { mkdirs() }
+class Media(private val dataDir: File, private val bell: Device) {
+    private val clipDir = File(dataDir, "clips/${bell.id}").apply { mkdirs() }
     private val voiceDir = File(dataDir, "voice").apply { mkdirs() }
     private val ttsDir = File(dataDir, "tts").apply { mkdirs() }
     private val locks = ConcurrentHashMap<Long, Any>()
@@ -79,14 +79,20 @@ class Media(private val dataDir: File, private val bell: Doorbell, private val s
 
     fun deleteClip(start: Long) {
         listOf("mp4", "ts", "part").forEach { File(clipDir, "$start.$it").delete() }
-        store.putStringSet("hidden", store.stringSet("hidden") + start.toString())
+        bell.ds.putStringSet("hidden", bell.ds.stringSet("hidden") + start.toString())
     }
 
-    /** Keeps the clip cache below ~2 GB. */
-    fun trimCache(maxBytes: Long = 2L shl 30) {
+    /**
+     * Keeps the clip cache small: clips are only kept for a day (the originals stay on
+     * the camera's SD card) and never more than [maxBytes] in total.
+     */
+    fun trimCache(maxBytes: Long = 500L shl 20, maxAgeMs: Long = 24 * 3600_000L) {
         val files = clipDir.listFiles()?.sortedBy { it.lastModified() } ?: return
+        val now = System.currentTimeMillis()
         var total = files.sumOf { it.length() }
-        for (f in files) { if (total <= maxBytes) break; total -= f.length(); f.delete() }
+        for (f in files) {
+            if (now - f.lastModified() > maxAgeMs || total > maxBytes) { total -= f.length(); f.delete() }
+        }
     }
 
     // ---------------- audio ----------------

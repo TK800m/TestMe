@@ -69,7 +69,7 @@ import java.util.Locale
 private val nl = Locale("nl", "NL")
 
 @Composable
-fun ClipsScreen() {
+fun ClipsScreen(onSelectDevice: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     if (!Prefs(ctx).configured) {
         Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Stel eerst de deurbel in via Instellingen.") }
@@ -106,8 +106,9 @@ fun ClipsScreen() {
     }
 
     Column(Modifier.fillMaxSize()) {
+        DeviceChips(onSelectDevice)
         Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Opnames op de deurbel", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
+            Text("Opnames van ${Prefs(ctx).device?.name ?: "het apparaat"}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
             IconButton(onClick = { reload++ }) { Icon(Icons.Filled.Refresh, "Vernieuwen") }
         }
         LazyRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
@@ -118,7 +119,7 @@ fun ClipsScreen() {
         if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
         error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
         if (!loading && error == null && clips.isEmpty()) {
-            Text("Geen opnames gevonden. Zit er een micro-SD-kaart in de deurbel en staat opnemen aan?",
+            Text("Geen opnames gevonden. Zit er een micro-SD-kaart in het apparaat en staat opnemen aan?",
                 Modifier.padding(16.dp), textAlign = TextAlign.Center)
         }
         LazyColumn(Modifier.fillMaxSize()) {

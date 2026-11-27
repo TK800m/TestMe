@@ -82,13 +82,13 @@ import nl.tapo.deurbel.VisitorAudio
 
 @OptIn(ExperimentalLayoutApi::class)
 @Composable
-fun LiveScreen() {
+fun LiveScreen(onSelectDevice: (String) -> Unit = {}) {
     val ctx = LocalContext.current
     val prefs = remember { Prefs(ctx) }
     val scope = rememberCoroutineScope()
     if (!prefs.configured) {
         Box(Modifier.fillMaxSize().padding(24.dp), contentAlignment = Alignment.Center) {
-            Text("Stel eerst de deurbel in via Instellingen.", textAlign = TextAlign.Center)
+            Text("Stel eerst je deurbel of camera in via Instellingen.", textAlign = TextAlign.Center)
         }
         return
     }
@@ -107,6 +107,9 @@ fun LiveScreen() {
     val responses = remember { Responses.list(ctx) }
     var player by remember { mutableStateOf<ExoPlayer?>(null) }
     var resumed by remember { mutableStateOf(true) }
+    var paused by remember { mutableStateOf(false) }
+    val dev = remember { prefs.device }
+    val onBattery = power0(ctx)
 
     val micPermission = rememberLauncherForActivityResult(ActivityResultContracts.RequestPermission()) { }
     val lifecycle = LocalLifecycleOwner.current.lifecycle
@@ -121,8 +124,8 @@ fun LiveScreen() {
     }
 
     // live player, recreated on retry and released when leaving the screen / app
-    DisposableEffect(attempt, resumed) {
-        if (!resumed) return@DisposableEffect onDispose { }
+    DisposableEffect(attempt, resumed, paused) {
+        if (!resumed || paused) return@DisposableEffect onDispose { }
         error = null; buffering = true
         val p = LivePlayer.create(ctx, visitor)
         p.addListener(object : Player.Listener {
@@ -135,22 +138,32 @@ fun LiveScreen() {
         onDispose { p.release(); player = null; visitor.release() }
     }
 
+    // live view keeps the camera awake: pause it automatically (sooner for battery cameras)
+    LaunchedEffect(attempt, resumed, paused, talking) {
+        if (!resumed || paused || talking) return@LaunchedEffect
+        kotlinx.coroutines.delay(if (onBattery) 90_000 else 180_000)
+        paused = true
+    }
+
     var power by remember { mutableStateOf<nl.tapo.deurbel.core.PowerInfo?>(null) }
     LaunchedEffect(Unit) {
         power = withContext(Dispatchers.IO) { try { Camera.client(ctx).power() } catch (_: Exception) { null } }
     }
     LaunchedEffect(Unit) {
+        if (dev?.isDoorbell != true) return@LaunchedEffect
         chime = withContext(Dispatchers.IO) {
             try { Camera.client(ctx).chimeRingPlan()?.optString("enabled")?.let { it == "on" } } catch (_: Exception) { null }
         }
     }
 
     Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        DeviceChips(onSelectDevice)
         Row(Modifier.fillMaxWidth().padding(horizontal = 16.dp, vertical = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             Text("Meldingen", Modifier.weight(1f))
             Switch(checked = notify, onCheckedChange = {
                 notify = it; prefs.notifications = it; DoorbellService.sync(ctx)
             })
+            if (dev?.isDoorbell == true) {
             Spacer(Modifier.width(16.dp))
             Text("Gong")
             Spacer(Modifier.width(8.dp))
@@ -163,6 +176,7 @@ fun LiveScreen() {
                     } catch (e: Exception) { message = "Gong wijzigen mislukt: ${Camera.friendly(e)}" }
                 }
             })
+            }
         }
 
         power?.takeIf { it.hasBattery || it.external != null }?.let { p ->
@@ -192,7 +206,13 @@ fun LiveScreen() {
                     }
                 }, update = { it.player = p }, modifier = Modifier.fillMaxSize())
             }
-            if (error != null) {
+            if (paused) {
+                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                    Text("Live beeld gepauzeerd om energie te besparen", color = Color.White, textAlign = TextAlign.Center)
+                    Spacer(Modifier.height(8.dp))
+                    Button(onClick = { paused = false; attempt++ }) { Text("Verder kijken") }
+                }
+            } else if (error != null) {
                 Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
                     Text(error!!, color = Color.White, textAlign = TextAlign.Center)
                     Spacer(Modifier.height(8.dp))
@@ -259,5 +279,27 @@ fun LiveScreen() {
             Text(it, Modifier.padding(16.dp), style = MaterialTheme.typography.bodyMedium, color = MaterialTheme.colorScheme.secondary)
         }
         Spacer(Modifier.height(24.dp))
+    }
+}
+
+/** Battery devices (e.g. Tapo C425) are known from the last power check of the background service. */
+private fun power0(ctx: android.content.Context): Boolean =
+    ctx.getSharedPreferences("deurbel", android.content.Context.MODE_PRIVATE).getBoolean("dev.${Prefs(ctx).currentId}.on_battery", false)
+
+/** Switch between doorbell and cameras (only shown with more than one device). */
+@OptIn(ExperimentalLayoutApi::class)
+@Composable
+fun DeviceChips(onSelect: (String) -> Unit) {
+    val ctx = LocalContext.current
+    val prefs = remember { Prefs(ctx) }
+    val devices = prefs.devices
+    if (devices.size < 2) return
+    val current = prefs.currentId
+    androidx.compose.foundation.layout.FlowRow(Modifier.padding(horizontal = 12.dp, vertical = 6.dp),
+        horizontalArrangement = Arrangement.spacedBy(8.dp)) {
+        devices.forEach { d ->
+            androidx.compose.material3.FilterChip(selected = d.id == current, onClick = { if (d.id != current) onSelect(d.id) },
+                label = { Text(d.name) })
+        }
     }
 }

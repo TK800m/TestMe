@@ -78,10 +78,10 @@ object Responses {
     }
 
     /** Speaks the response through the doorbell speaker. */
-    suspend fun sendToDoor(ctx: Context, r: QuickResponse) {
+    suspend fun sendToDoor(ctx: Context, r: QuickResponse, devId: String? = null) {
         val pcm = pcmFor(ctx, r)
         withContext(Dispatchers.IO) {
-            TalkSession(Camera.client(ctx)).use { it.playPcm(pcm) }
+            TalkSession(Camera.client(ctx, devId)).use { it.playPcm(pcm) }
         }
     }
 

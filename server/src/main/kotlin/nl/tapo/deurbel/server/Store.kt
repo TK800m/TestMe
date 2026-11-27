@@ -90,9 +90,9 @@ class Store(private val dir: File) {
 
     // ---- ring history ----
     @Synchronized
-    fun addRing(epochSec: Long, type: String) {
+    fun addRing(epochSec: Long, type: String, device: String = "") {
         val a = state.optJSONArray("rings") ?: JSONArray()
-        a.put(JSONObject().put("time", epochSec).put("type", type))
+        a.put(JSONObject().put("time", epochSec).put("type", type).put("dev", device))
         while (a.length() > 100) a.remove(0)
         state.put("rings", a); save()
     }

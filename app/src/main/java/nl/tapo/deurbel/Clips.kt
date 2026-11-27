@@ -43,7 +43,13 @@ object Clips {
 
     suspend fun timeCorrection(ctx: Context): Long = withContext(Dispatchers.IO) { Camera.client(ctx).timeCorrection() }
 
-    private fun dir(ctx: Context) = File(ctx.cacheDir, "clips").apply { mkdirs() }
+    private fun dir(ctx: Context) = File(ctx.cacheDir, "clips/${Prefs(ctx).currentId}").apply { mkdirs() }
+
+    /** Downloaded clips are only kept for a day: the originals stay on the camera's SD card. */
+    fun cleanup(ctx: Context, maxAgeMs: Long = 24 * 3600_000L) {
+        val now = System.currentTimeMillis()
+        File(ctx.cacheDir, "clips").walkBottomUp().filter { it.isFile && now - it.lastModified() > maxAgeMs }.forEach { it.delete() }
+    }
 
     fun cached(ctx: Context, r: Recording): File? =
         listOf("mp4", "ts").map { File(dir(ctx), "${key(r)}.$it") }.firstOrNull { it.length() > 0 }

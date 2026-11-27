@@ -237,3 +237,35 @@ textarea { width: 100%; font: inherit; font-size: 18px; color: var(--text); back
 .type-name { position: relative; cursor: pointer; }
 .type-name select { position: absolute; inset: 0; opacity: 0; width: 100%; cursor: pointer; font-size: 16px; }
 #learn-btn:disabled { opacity: .85; }
+
+/* ---------- multiple devices ---------- */
+.dev-switch { display: flex; margin: 10px 16px 0; }
+.dev-switch button { flex: 1; padding: 8px; }
+.stage-msg.paused { background: rgba(0,0,0,.72); }
+.dev-head { display: flex; align-items: center; gap: 14px; margin: 0 0 14px; }
+.dev-head h2 { margin: 0; }
+.dev-head .sub { margin: 2px 0 0 !important; font-size: 13px !important; }
+.dev-head .icon-btn { background: var(--surface-2); }
+.dev-head .icon-btn svg { width: 18px; height: 18px; }
+.ico-wrap.big { width: 48px; height: 48px; border-radius: 14px; }
+.ico-wrap.big svg { width: 26px; height: 26px; }
+.sheet .card.flush { margin: 0; background: var(--surface-2); }
+.sheet .card.flush .row:active { background: var(--surface); }
+.sheet .btn.wide.flush { width: 100%; margin: 10px 0 0; }
+.sheet .section-title { margin-top: 22px; }
+.time-input { font: inherit; font-size: 17px; color: var(--text); background: var(--surface-2); border: 0; border-radius: 10px; padding: 6px 10px; }
+
+/* ---------- detection-zone editor ---------- */
+.zone-wrap { flex: 1; display: flex; align-items: center; padding: 0 8px; }
+.zone-box { position: relative; width: 100%; touch-action: none; user-select: none; -webkit-user-select: none; }
+.zone-box img { display: block; width: 100%; border-radius: 12px; min-height: 120px; background: #111; }
+.zone-box.noimg { aspect-ratio: 16 / 9; background: repeating-linear-gradient(45deg, #15181d 0 12px, #1b1f25 12px 24px); border-radius: 12px; }
+.zone-box.noimg img { display: none; }
+.zone-box svg { position: absolute; inset: 0; width: 100%; height: 100%; }
+.zone { fill: rgba(245,165,36,.12); stroke: rgba(255,255,255,.75); stroke-width: 2; vector-effect: non-scaling-stroke; }
+.zone.sel { fill: rgba(245,165,36,.28); stroke: var(--accent); stroke-width: 3; }
+.zone-handle { position: absolute; width: 30px; height: 30px; margin: -15px 0 0 -15px; border-radius: 50%; background: #fff;
+  border: 4px solid var(--accent); box-shadow: 0 2px 8px rgba(0,0,0,.5); touch-action: none; cursor: grab; }
+.zone-hint { color: #9aa1ab; font-size: 13px; text-align: center; margin: 12px 24px 0; }
+.viewer .action.primary .circle { background: var(--accent); color: var(--accent-ink); }
+.viewer-actions { align-items: flex-end; }

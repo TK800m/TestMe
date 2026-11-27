@@ -35,6 +35,11 @@ const ICONS = {
   download: '<path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4M7 10l5 5 5-5M12 15V3"/>',
   refresh: '<path d="M21 12a9 9 0 1 1-3-6.7L21 8M21 3v5h-5"/>',
   shield: '<path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10Z"/><path d="m9 12 2 2 4-4"/>',
+  clock: '<circle cx="12" cy="12" r="9"/><path d="M12 7v5l3 2"/>',
+  camera: '<path d="M14.5 4h-5L7 7H4a2 2 0 0 0-2 2v9a2 2 0 0 0 2 2h16a2 2 0 0 0 2-2V9a2 2 0 0 0-2-2h-3l-2.5-3Z"/><circle cx="12" cy="13" r="3"/>',
+  edit: '<path d="M17 3a2.8 2.8 0 1 1 4 4L7.5 20.5 2 22l1.5-5.5Z"/>',
+  zone: '<path d="M4 18 8 6h9l3 12Z"/><circle cx="4" cy="18" r="1.5"/><circle cx="8" cy="6" r="1.5"/><circle cx="17" cy="6" r="1.5"/><circle cx="20" cy="18" r="1.5"/>',
+  leaf: '<path d="M11 20A7 7 0 0 1 9.8 6.1C15.5 5 17 4.5 19 2c1 2 2 4.2 2 8 0 5.5-4.8 10-10 10Z"/><path d="M2 21c0-3 1.9-5.4 5.1-6"/>',
   alert: '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0Z"/><path d="M12 9v4M12 17h.01"/>',
 };
 const icon = (n, cls = '') => `<svg class="${cls}" viewBox="0 0 24 24">${ICONS[n] || ''}</svg>`;
@@ -108,8 +113,34 @@ function go(v) {
 }
 $$('.tabbar button').forEach((b) => (b.onclick = () => { buzz(); go(b.dataset.v); }));
 
-// ---------- status ----------
+// ---------- status / devices ----------
 let status = null;
+let curDev = null;
+try { curDev = new URLSearchParams(location.search).get('dev') || localStorage.getItem('dev'); } catch (e) {}
+const devs = () => (status && status.devices) || [];
+const devById = (id) => devs().find((d) => d.id === id);
+const cur = () => devById(curDev) || devs()[0];
+const dq = (sep = '?') => (cur() ? `${sep}dev=${cur().id}` : '');
+const devIcon = (d) => (d && d.kind === 'camera' ? 'camera' : 'bell');
+
+function renderDevSwitch() {
+  const list = devs();
+  ['#dev-switch-live', '#dev-switch-clips'].forEach((sel) => {
+    const el = $(sel);
+    el.hidden = list.length < 2;
+    if (list.length < 2) return;
+    el.innerHTML = list.map((d) => `<button data-id="${d.id}" class="${d.id === cur().id ? 'on' : ''}"></button>`).join('');
+    $$('button', el).forEach((b, i) => { b.textContent = list[i].name; b.onclick = () => selectDev(b.dataset.id); });
+  });
+}
+function selectDev(id) {
+  if (cur() && cur().id === id) return;
+  buzz(); curDev = id;
+  try { localStorage.setItem('dev', id); } catch (e) {}
+  renderDevSwitch(); renderPower();
+  stopLive(); if (view === 'live') startLive();
+  clipsLoaded = false; if (view === 'clips') loadClips(true);
+}
 async function refreshStatus() {
   try {
     status = await api('/api/status');
@@ -120,7 +151,8 @@ async function refreshStatus() {
   }
   if (status.setup) { showSetup(); return; }
   if (!$('#setup').hidden) { $('#setup').hidden = true; stopLive(); go('live'); }
-  renderRecent(); renderDnd(); renderRingBanner(); renderPower();
+  if (!devById(curDev) && devs()[0]) curDev = devs()[0].id;
+  renderDevSwitch(); renderRecent(); renderDnd(); renderRingBanner(); renderPower();
   if (view === 'settings') renderSettings();
   updatePushNotice();
 }
@@ -132,10 +164,10 @@ function renderRecent() {
   box.innerHTML = rings.slice(0, 4).map((r) => `
     <button class="row" data-t="${r.time}">
       <span class="ico-wrap amber">${icon('bell')}</span>
-      <div class="grow"><b>Iemand aan de deur</b><span>${ago(r.time)}</span></div>
+      <div class="grow"><b>${devs().length > 1 && devById(r.dev) ? devById(r.dev).name : 'Iemand aan de deur'}</b><span>${ago(r.time)}</span></div>
       <span class="meta">${hhmm(r.time)}</span>
     </button>`).join('');
-  $$('#recent .row').forEach((b) => (b.onclick = () => { go('clips'); }));
+  $$('#recent .row').forEach((b, i) => (b.onclick = () => { const r = rings[i]; if (r.dev && devById(r.dev)) { curDev = r.dev; renderDevSwitch(); } clipsLoaded = false; go('clips'); }));
 }
 
 function renderRingBanner() {
@@ -150,27 +182,24 @@ function batteryIcon(pct, charging) {
   return `<svg viewBox="0 0 24 24"><rect x="2" y="7" width="17" height="10" rx="2.5"/><path d="M22 11v2"/>` +
     (charging ? '<path d="m11 8.5-2.5 4h3l-2 3" stroke-width="1.8"/>' : `<rect x="4.5" y="9.5" width="${w}" height="5" rx="1" fill="currentColor" stroke="none"/>`) + '</svg>';
 }
-function renderPower() {
-  const p = status && status.power;
-  const pill = $('#batt-pill');
-  if (!p) { pill.hidden = true; $('#batt-sub').textContent = 'Nog niet bekend'; $('#batt-pct').textContent = ''; return; }
+function powerText(p) {
+  if (!p) return 'Nog niet bekend';
   const hasBatt = p.percent !== null;
-  const problem = hasBatt && p.external === false && !p.charging;
+  if (!hasBatt) return 'Netvoeding';
+  if (p.full) return `${p.percent}% · vol`;
+  if (p.charging) return `${p.percent}% · laadt op`;
+  if (p.external === true) return `${p.percent}% · voeding aangesloten`;
+  if (p.external === false) return p.low ? `${p.percent}% · bijna leeg – laad op of controleer de voeding` : `${p.percent}% · op batterij`;
+  return `${p.percent}%`;
+}
+function renderPower() {
+  const d = cur(); const p = d && d.power;
+  const pill = $('#batt-pill');
+  const hasBatt = p && p.percent !== null;
   pill.hidden = !hasBatt;
+  if (!hasBatt) return;
   pill.classList.toggle('low', !!p.low);
-  pill.innerHTML = hasBatt ? `${batteryIcon(p.percent, p.charging)}<span>${p.percent}%</span>` : '';
-  let sub;
-  if (!hasBatt) sub = 'Gevoed door netvoeding';
-  else if (p.full) sub = 'Volledig opgeladen';
-  else if (p.charging) sub = 'Laadt op via netvoeding';
-  else if (p.external === true) sub = 'Netvoeding aangesloten';
-  else if (p.external === false) sub = p.low ? 'Bijna leeg – laad op of controleer de netvoeding' : 'Op batterij – netvoeding niet actief';
-  else sub = p.low ? 'Bijna leeg – opladen' : 'Batterij';
-  $('#batt-sub').textContent = sub;
-  $('#batt-pct').textContent = hasBatt ? `${p.percent}%` : '';
-  const ico = $('#batt-ico');
-  ico.className = 'ico-wrap ' + (p.low ? 'red' : problem ? 'amber' : 'green');
-  ico.innerHTML = batteryIcon(p.percent, p.charging);
+  pill.innerHTML = `${batteryIcon(p.percent, p.charging)}<span>${p.percent}%</span>`;
 }
 
 function renderDnd() {
@@ -188,23 +217,28 @@ function setPill(text, live) { const p = $('#live-pill'); p.classList.toggle('li
 function showStageMsg(text) { $('#stage-msg').hidden = false; $('#stage-text').textContent = text; setPill('Offline', false); }
 
 async function startLive() {
-  if (liveEl) return;
-  $('#stage-msg').hidden = true; setPill('Verbinden…', false);
+  if (liveEl || !cur()) return;
+  $('#stage-msg').hidden = true; $('#live-paused').hidden = true; setPill('Verbinden…', false);
   try { await loadPlayer(); } catch (e) { showStageMsg('Live beeld is niet beschikbaar. Draait de thuisserver?'); return; }
   liveEl = document.createElement('video-stream');
   liveEl.mode = talking ? 'webrtc' : 'webrtc,mse,hls,mjpeg';
   liveEl.media = talking ? 'video,audio,microphone' : 'video,audio';
   liveEl.background = false;
   $('#player').replaceChildren(liveEl);
-  liveEl.src = new URL('api/ws?src=deurbel', go2rtcBase).toString();
+  const dev = cur();
+  liveEl.src = new URL(`api/ws?src=${dev.stream}`, go2rtcBase).toString();
   clearInterval(liveWatch);
   const started = Date.now();
-  liveWatch = setInterval(() => {                 // show "Live" once frames arrive, error after 20 s
+  // battery cameras wake up slower, and live view drains them: pause automatically
+  const wakeMs = dev.battery ? 35000 : 20000, maxMs = dev.battery ? 90000 : 180000;
+  liveWatch = setInterval(() => {
     const v = liveEl && liveEl.video;
     if (v && v.readyState >= 2 && !v.paused) { setPill('Live', true); applySound(); }
-    else if (Date.now() - started > 20000 && !(v && v.readyState >= 2)) { stopLive(); showStageMsg('De deurbel reageert niet. Probeer het opnieuw.'); }
+    else if (Date.now() - started > wakeMs && !(v && v.readyState >= 2)) { stopLive(); showStageMsg(`${dev.name} reageert niet. Probeer het opnieuw.`); }
+    if (!talking && Date.now() - started > maxMs) { stopLive(); setPill('Gepauzeerd', false); $('#live-paused').hidden = false; }
   }, 700);
 }
+$('#btn-resume').onclick = () => { buzz(); startLive(); };
 function stopLive() { clearInterval(liveWatch); if (liveEl) { liveEl.remove(); liveEl = null; } }
 function applySound() {
   const v = liveEl && liveEl.video;
@@ -254,7 +288,7 @@ $('#act-reply').onclick = () => {
       if (b.classList.contains('busy')) return;
       buzz(); b.classList.add('busy'); $('.state', b).innerHTML = '<div class="spinner" style="width:20px;height:20px;border-width:2px"></div>';
       try {
-        await post(`/api/replies/${r.id}/play`);
+        await post(`/api/replies/${r.id}/play${dq()}`);
         b.classList.replace('busy', 'done'); $('.state', b).innerHTML = icon('check');
         setTimeout(closeSheet, 700);
       } catch (e) { b.classList.remove('busy'); $('.state', b).innerHTML = icon('speaker'); toast('Afspelen mislukt: ' + e.message); }
@@ -287,14 +321,14 @@ async function loadClips(reset) {
   const list = $('#clip-list');
   if (reset) {
     dayIdx = 0; clipCache = {}; list.innerHTML = '<div class="skeleton"></div><div class="skeleton"></div><div class="skeleton"></div>';
-    try { days = await api('/api/days'); } catch (e) { list.innerHTML = `<div class="card"><div class="empty">${e.message}</div></div>`; return; }
+    try { days = await api(`/api/days${dq()}`); } catch (e) { list.innerHTML = `<div class="card"><div class="empty">${e.message}</div></div>`; return; }
     list.innerHTML = '';
-    if (!days.length) { list.innerHTML = '<div class="card"><div class="empty">Nog geen opnames. Zit er een micro-SD-kaart in de deurbel?</div></div>'; }
+    if (!days.length) { list.innerHTML = '<div class="card"><div class="empty">Nog geen opnames. Zit er een micro-SD-kaart in het apparaat?</div></div>'; }
   }
   clipsLoaded = true;
   const batch = days.slice(dayIdx, dayIdx + 3); dayIdx += batch.length;
   for (const d of batch) {
-    try { clipCache[d] = await api(`/api/clips?date=${d}`); } catch (e) { clipCache[d] = []; }
+    try { clipCache[d] = await api(`/api/clips?date=${d}${dq('&')}`); } catch (e) { clipCache[d] = []; }
     renderDay(d);
   }
   $('#clip-more').hidden = dayIdx >= days.length;
@@ -328,7 +362,7 @@ let viewing = null;
 function clipUrl(c, dl) {
   const d = new Date(c.time * 1000);
   const name = `${d.getFullYear()}${pad(d.getMonth() + 1)}${pad(d.getDate())}_${pad(d.getHours())}${pad(d.getMinutes())}`;
-  return `/api/clip?start=${c.start}&end=${c.end}` + (dl ? `&download=1&name=${name}` : '');
+  return `/api/clip?start=${c.start}&end=${c.end}${dq('&')}` + (dl ? `&download=1&name=${name}` : '');
 }
 function openViewer(c, day) {
   buzz(); viewing = { c, day };
@@ -351,7 +385,7 @@ $('#viewer-save').onclick = async () => {
     if (navigator.canShare) {                               // iPhone: "Bewaar video" in the share sheet
       toast('Video klaarmaken…');
       const blob = await (await fetch(clipUrl(c))).blob();
-      const file = new File([blob], `Deurbel_${hhmm(c.time).replace(':', '')}.mp4`, { type: blob.type || 'video/mp4' });
+      const file = new File([blob], `${(cur() && cur().name) || 'Deurbel'}_${hhmm(c.time).replace(':', '')}.mp4`, { type: blob.type || 'video/mp4' });
       if (navigator.canShare({ files: [file] })) { await navigator.share({ files: [file] }); return; }
     }
   } catch (e) { if (e.name === 'AbortError') return; }
@@ -365,7 +399,7 @@ $('#viewer-delete').onclick = () => {
   clipCache[day] = before.filter((x) => x.start !== c.start); renderDay(day);
   let undone = false;
   toast('Opname verwijderd', 'Ongedaan maken', () => { undone = true; clipCache[day] = before; renderDay(day); });
-  setTimeout(() => { if (!undone) api(`/api/clip?start=${c.start}`, { method: 'DELETE' }).catch((e) => toast(e.message)); }, 5200);
+  setTimeout(() => { if (!undone) api(`/api/clip?start=${c.start}${dq('&')}`, { method: 'DELETE' }).catch((e) => toast(e.message)); }, 5200);
 };
 
 // ---------- push notifications ----------
@@ -397,53 +431,221 @@ async function enablePush() {
 }
 $('#push-notice').onclick = enablePush;
 $('#set-push').onclick = enablePush;
-$('#set-test').onclick = async () => { buzz(); try { const r = await post('/api/push/test'); toast(`Testmelding verstuurd naar ${r.devices} telefoon${r.devices === 1 ? '' : 's'}`); } catch (e) { toast(e.message); } };
+$('#set-test').onclick = async () => { buzz(); try { const r = await post('/api/push/test'); toast(`Testmelding verstuurd naar ${r.phones} telefoon${r.phones === 1 ? '' : 's'}`); } catch (e) { toast(e.message); } };
 
 // ---------- settings ----------
 async function renderSettings() {
   updatePushNotice();
-  if (!fw) loadFirmwareSummary();
-  if (!status) return;
+  if (!status || status.setup) return;
   $('#set-notify').checked = status.notifications;
-  $('#set-chime').checked = status.chime === true;
-  $('#set-chime').disabled = status.chime === null;
-  $('#chime-sub').textContent = status.chime === null ? 'Niet beschikbaar' : (status.dndUntil ? 'Stil door Niet storen' : 'Belgeluid in huis');
-  $('#devices-sub').textContent = `${status.devices} telefoon${status.devices === 1 ? '' : 's'} gekoppeld`;
-  const types = $('#types');
-  const list = status.types || [];
-  if (!list.length) {
-    types.innerHTML = '<div class="empty">Nog geen gebeurtenissen gezien. Tik hierboven op "Aanbellen herkennen".</div>';
-    $('#types-foot').textContent = '';
-  } else {
-    types.innerHTML = '';
-    const labelIcon = { ring: 'bell', person: 'person', motion: 'video', package: 'download', vehicle: 'send', pet: 'person', other: 'message' };
-    list.forEach((t) => {
-      const row = document.createElement('div'); row.className = 'row';
-      const opts = Object.entries(status.labelNames || {}).map(([k, v]) => `<option value="${k}" ${t.label === k ? 'selected' : ''}>${v}</option>`).join('');
-      row.innerHTML = `<span class="ico-wrap ${t.label === 'ring' ? 'amber' : 'grey'}">${icon(labelIcon[t.label] || 'bell')}</span>
-        <label class="grow type-name"><b></b><span></span>
-          <select aria-label="Naam kiezen"><option value="" ${t.label ? '' : 'selected'} disabled>Kies een naam…</option>${opts}</select></label>
-        <input type="checkbox" class="toggle" ${t.notify ? 'checked' : ''} aria-label="Melding">`;
-      $('b', row).textContent = t.name; $('span:not(.ico-wrap)', row).textContent = t.desc;
-      $('select', row).onchange = async (e) => { buzz(); try { status = await post('/api/types/label', { type: t.type, label: e.target.value }); renderSettings(); } catch (err) { toast(err.message); } };
-      $('input', row).onchange = async (e) => {
-        buzz(); const set = new Set(list.filter((x) => x.notify).map((x) => x.type)); e.target.checked ? set.add(t.type) : set.delete(t.type);
-        status = await post('/api/settings', { ringTypes: [...set] }); renderSettings();
-      };
-      types.appendChild(row);
-    });
-    $('#types-foot').textContent = list.some((x) => x.notify)
-      ? 'Je krijgt alleen een melding bij wat aan staat. Tik op een naam om die te wijzigen.'
-      : 'Nu krijg je bij álle gebeurtenissen een melding (ook beweging). Zet alleen Aanbellen aan voor minder meldingen.';
-  }
-  $('#about').textContent = status.connected ? 'Verbonden met de deurbel' : status.status;
+  $('#devices-sub').textContent = `${status.phones} telefoon${status.phones === 1 ? '' : 's'} gekoppeld`;
+  const box = $('#dev-list'); box.innerHTML = '';
+  devs().forEach((d) => {
+    const b = document.createElement('button'); b.className = 'row';
+    b.innerHTML = `<span class="ico-wrap ${d.connected ? (d.kind === 'camera' ? 'blue' : 'amber') : 'grey'}">${icon(devIcon(d))}</span>
+      <div class="grow"><b></b><span></span></div>${icon('chevronRight', 'chev')}`;
+    $('b', b).textContent = d.name;
+    $('.grow span', b).textContent = [d.model, d.connected ? 'verbonden' : 'niet bereikbaar', d.power && d.power.percent !== null ? `${d.power.percent}%` : ''].filter(Boolean).join(' · ');
+    b.onclick = () => openDevice(d.id);
+    box.appendChild(b);
+  });
+  const au = status.autoUpdate || { on: true, time: '01:00' };
+  $('#au-on').checked = au.on; $('#au-time').value = au.time; $('#au-time-row').hidden = !au.on;
+  $('#about').textContent = status.connected ? 'Alles verbonden' : (devs().find((d) => !d.connected) ? `${devs().find((d) => !d.connected).name}: ${devs().find((d) => !d.connected).status}` : status.status);
 }
 $('#set-notify').onchange = async (e) => { buzz(); try { status = await post('/api/settings', { notifications: e.target.checked }); } catch (err) { toast(err.message); } };
-$('#set-chime').onchange = async (e) => {
-  buzz();
-  try { await post('/api/chime', { on: e.target.checked }); toast(e.target.checked ? 'Gong staat aan' : 'Gong staat uit'); }
-  catch (err) { e.target.checked = !e.target.checked; toast('Gong: ' + err.message); }
+async function saveAutoUpdate() {
+  try {
+    status = await post('/api/autoupdate', { on: $('#au-on').checked, time: $('#au-time').value || '01:00' });
+    toast($('#au-on').checked ? `Updates worden automatisch geïnstalleerd om ${$('#au-time').value}` : 'Automatisch bijwerken staat uit');
+  } catch (e) { toast(e.message); }
+  renderSettings();
+}
+$('#au-on').onchange = () => { buzz(); saveAutoUpdate(); };
+$('#au-time').onchange = () => saveAutoUpdate();
+
+// ---------- one device: settings sheet ----------
+let sheetDev = null;
+const labelIcon = { ring: 'bell', person: 'person', motion: 'video', package: 'download', vehicle: 'send', pet: 'person', other: 'message' };
+function openDevice(id) { sheetDev = id; renderDevice(); openSheet('#sheet-dev'); }
+function renderDevice() {
+  const d = devById(sheetDev); if (!d) { closeSheet(); return; }
+  const body = $('#dev-body');
+  const p = d.power;
+  body.innerHTML = `
+    <div class="dev-head"><span class="ico-wrap ${d.kind === 'camera' ? 'blue' : 'amber'} big">${icon(devIcon(d))}</span>
+      <div class="grow"><h2></h2><span class="sub">${d.model || ''} · ${d.host} · ${d.connected ? 'verbonden' : 'niet bereikbaar'}</span></div>
+      <button class="icon-btn" id="dv-rename" aria-label="Naam wijzigen">${icon('edit')}</button></div>
+    <div class="card flush">
+      ${p ? `<div class="row"><span class="ico-wrap ${p.low ? 'red' : 'green'}">${batteryIcon(p.percent, p.charging)}</span>
+        <div class="grow"><b>Voeding</b><span>${powerText(p)}</span></div></div>` : ''}
+      ${d.kind === 'doorbell' ? `<label class="row"><span class="ico-wrap violet">${icon('music')}</span>
+        <div class="grow"><b>Gong</b><span>${d.chime === null ? 'Niet beschikbaar' : status.dndUntil ? 'Stil door Niet storen' : 'Belgeluid in huis'}</span></div>
+        <input type="checkbox" class="toggle" id="dv-chime" ${d.chime ? 'checked' : ''} ${d.chime === null ? 'disabled' : ''}></label>` : ''}
+      <label class="row"><span class="ico-wrap green">${icon('leaf')}</span>
+        <div class="grow"><b>Zuinig opnemen</b><span>Alleen opnemen als er iets gebeurt (minder stroom en opslag)</span></div>
+        <input type="checkbox" class="toggle" id="dv-rec" ${d.eventsOnly ? 'checked' : ''} ${d.eventsOnly === null ? 'disabled' : ''}></label>
+      <button class="row" id="dv-zones"><span class="ico-wrap blue">${icon('zone')}</span>
+        <div class="grow"><b>Detectiezones</b><span>Alleen in deze zones reageren</span></div>${icon('chevronRight', 'chev')}</button>
+      <button class="row" id="dv-fw"><span class="ico-wrap grey">${icon('download')}</span>
+        <div class="grow"><b>Software</b><span>Zoeken naar updates</span></div>${icon('chevronRight', 'chev')}</button>
+    </div>
+    <h3 class="section-title" style="margin-left:4px">Waarvoor een melding?</h3>
+    ${d.kind === 'doorbell' ? `<button class="btn wide flush" id="dv-learn">${icon('bell')}Aanbellen herkennen</button>
+      <p class="foot" id="dv-learn-hint" style="margin-left:4px">Druk één keer op de bel, dan weet de app welke gebeurtenis het aanbellen is.</p>` : ''}
+    <div class="card flush" id="dv-types"></div>
+    <p class="foot" id="dv-types-foot" style="margin-left:4px"></p>
+    <button class="btn text danger" id="dv-remove">Apparaat verwijderen uit de app</button>`;
+  $('h2', body).textContent = d.name;
+  // event types
+  const types = $('#dv-types');
+  if (!d.types.length) types.innerHTML = '<div class="empty">Nog geen gebeurtenissen gezien.</div>';
+  d.types.forEach((t) => {
+    const row = document.createElement('div'); row.className = 'row';
+    const opts = Object.entries(status.labelNames || {}).map(([k, v]) => `<option value="${k}" ${t.label === k ? 'selected' : ''}>${v}</option>`).join('');
+    row.innerHTML = `<span class="ico-wrap ${t.label === 'ring' ? 'amber' : 'grey'}">${icon(labelIcon[t.label] || 'bell')}</span>
+      <label class="grow type-name"><b></b><span></span>
+        <select aria-label="Naam kiezen"><option value="" ${t.label ? '' : 'selected'} disabled>Kies een naam…</option>${opts}</select></label>
+      <input type="checkbox" class="toggle" ${t.notify ? 'checked' : ''} aria-label="Melding">`;
+    $('b', row).textContent = t.name; $('label span', row).textContent = t.desc;
+    $('select', row).onchange = async (e) => { buzz(); try { status = await post(`/api/types/label?dev=${d.id}`, { type: t.type, label: e.target.value }); renderDevice(); } catch (err) { toast(err.message); } };
+    $('input', row).onchange = async (e) => {
+      buzz(); const set = new Set(d.types.filter((x) => x.notify).map((x) => x.type)); e.target.checked ? set.add(t.type) : set.delete(t.type);
+      status = await post(`/api/settings?dev=${d.id}`, { ringTypes: [...set] }); renderDevice();
+    };
+    types.appendChild(row);
+  });
+  $('#dv-types-foot').textContent = !d.types.length ? '' : d.types.some((x) => x.notify)
+    ? 'Je krijgt alleen een melding bij wat aan staat. Tik op een naam om die te wijzigen.'
+    : 'Nu krijg je bij álle gebeurtenissen een melding (ook beweging). Zet alleen aan waarvoor je een melding wilt.';
+  // actions
+  $('#dv-rename').onclick = async () => {
+    const n = prompt('Naam van dit apparaat', d.name); if (!n || !n.trim()) return;
+    try { status = await post(`/api/devices/rename?dev=${d.id}`, { name: n.trim() }); renderDevice(); renderDevSwitch(); renderSettings(); } catch (e) { toast(e.message); }
+  };
+  if ($('#dv-chime')) $('#dv-chime').onchange = async (e) => {
+    buzz();
+    try { await post(`/api/chime?dev=${d.id}`, { on: e.target.checked }); d.chime = e.target.checked; toast(e.target.checked ? 'Gong staat aan' : 'Gong staat uit'); }
+    catch (err) { e.target.checked = !e.target.checked; toast('Gong: ' + err.message); }
+  };
+  $('#dv-rec').onchange = async (e) => {
+    buzz();
+    try { status = await post(`/api/recording?dev=${d.id}`, { eventsOnly: e.target.checked }); toast(e.target.checked ? 'Neemt alleen nog op bij gebeurtenissen' : 'Neemt continu op'); }
+    catch (err) { e.target.checked = !e.target.checked; toast(err.message); }
+  };
+  $('#dv-zones').onclick = () => openZones(d);
+  $('#dv-fw').onclick = () => openFirmware(d.id);
+  if ($('#dv-learn')) $('#dv-learn').onclick = () => learnRing(d);
+  $('#dv-remove').onclick = async () => {
+    if (!confirm(`${d.name} verwijderen uit de app? Op het apparaat zelf verandert niets.`)) return;
+    try { status = await api(`/api/devices?dev=${d.id}`, { method: 'DELETE' }); closeSheet(); renderSettings(); renderDevSwitch(); toast('Verwijderd'); } catch (e) { toast(e.message); }
+  };
+}
+
+async function learnRing(d) {
+  buzz(30);
+  const btn = $('#dv-learn'); btn.disabled = true;
+  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;border-top-color:currentColor"></div>Luisteren… druk nu op de bel';
+  $('#dv-learn-hint').textContent = 'Loop naar de deur en druk één keer op de bel. Je hebt 90 seconden.';
+  let msg;
+  try {
+    status = await post(`/api/learn?dev=${d.id}`);
+    msg = status.learned ? 'Gelukt! Aanbellen is herkend. Je krijgt nu alleen een melding als er wordt aangebeld.' : 'Er is geen aanbelling gezien. Probeer het nog eens.';
+    if (status.learned) { toast('Aanbellen is herkend'); buzz(60); }
+  } catch (e) { msg = 'Herkennen lukte niet: ' + e.message; }
+  renderDevice(); if ($('#dv-learn-hint')) $('#dv-learn-hint').textContent = msg;
+}
+
+// ---------- add a device ----------
+let addIp = null;
+$('#dev-add').onclick = async () => {
+  buzz(); addIp = null; $('#add-err').hidden = true; $('#add-ip').value = ''; $('#add-name').value = '';
+  openSheet('#sheet-add');
+  const list = $('#add-found'); list.hidden = false;
+  list.innerHTML = '<div class="row"><div class="spinner" style="width:22px;height:22px;border-width:2px"></div><div class="grow"><b>Zoeken…</b><span>Dit duurt een paar seconden</span></div></div>';
+  let found = [];
+  try { found = await api('/api/setup/scan'); } catch (e) {}
+  $('#add-intro').textContent = found.length ? 'Gevonden. Kies het apparaat en geef het een naam.' : 'Geen nieuw apparaat gevonden. Vul het adres zelf in (te vinden in de app van je router).';
+  list.hidden = !found.length; list.innerHTML = '';
+  found.forEach((ip, i) => {
+    const b = document.createElement('button'); b.className = 'row';
+    b.innerHTML = `<span class="ico-wrap blue">${icon('camera')}</span><div class="grow"><b>Tapo-apparaat</b><span>${ip}</span></div><span class="radio"></span>`;
+    b.onclick = () => { addIp = ip; $$('#add-found .row').forEach((r) => r.classList.toggle('sel', r === b)); buzz(); };
+    list.appendChild(b); if (i === 0) b.click();
+  });
 };
+$('#add-go').onclick = async () => {
+  const ip = $('#add-ip').value.trim() || addIp;
+  const err = $('#add-err'); err.hidden = true;
+  if (!ip) { err.textContent = 'Kies een apparaat of vul het adres in'; err.hidden = false; return; }
+  const btn = $('#add-go'); btn.disabled = true; btn.textContent = 'Toevoegen…';
+  try {
+    const r = await post('/api/devices', { ip, name: $('#add-name').value.trim() });
+    toast(`${r.name} is toegevoegd`); buzz(40); closeSheet(); await refreshStatus(); renderSettings();
+  } catch (e) { err.textContent = e.message; err.hidden = false; }
+  btn.disabled = false; btn.textContent = 'Toevoegen';
+};
+
+// ---------- detection zones ----------
+let zones = [], zoneSel = 0, zoneDev = null;
+async function openZones(d) {
+  buzz(); zoneDev = d; closeSheet();
+  $('#zone-editor').hidden = false; $('#zone-sub').textContent = 'Zones ophalen…';
+  const img = $('#zone-img');
+  img.onerror = () => { img.removeAttribute('src'); $('#zone-box').classList.add('noimg'); };
+  $('#zone-box').classList.remove('noimg');
+  img.src = new URL(`api/frame.jpeg?src=${d.stream}&t=${Date.now()}`, go2rtcBase).toString();
+  try {
+    zones = (await api(`/api/zones?dev=${d.id}`)).zones;
+    $('#zone-sub').textContent = zones.length ? 'Sleep de hoeken om de zone aan te passen' : 'Nog geen zones: het hele beeld telt. Tik op "Zone erbij".';
+  } catch (e) { zones = []; $('#zone-sub').textContent = e.message; }
+  zoneSel = 0; drawZones();
+}
+function drawZones() {
+  const svg = $('#zone-svg'), box = $('#zone-box');
+  $$('.zone-handle', box).forEach((h) => h.remove());
+  svg.innerHTML = zones.map((z, i) => {
+    const sel = i === zoneSel ? ' sel' : '';
+    if (z.length === 2) {
+      const [a, b] = z; const x = Math.min(a[0], b[0]), y = Math.min(a[1], b[1]);
+      return `<rect class="zone${sel}" data-i="${i}" x="${x}" y="${y}" width="${Math.abs(b[0] - a[0])}" height="${Math.abs(b[1] - a[1])}"/>`;
+    }
+    return `<polygon class="zone${sel}" data-i="${i}" points="${z.map((p) => p.join(',')).join(' ')}"/>`;
+  }).join('');
+  $$('.zone', svg).forEach((el) => (el.onpointerdown = () => { zoneSel = +el.dataset.i; drawZones(); }));
+  const z = zones[zoneSel]; if (!z) return;
+  z.forEach((pt, n) => {
+    const h = document.createElement('div'); h.className = 'zone-handle';
+    h.style.left = `${pt[0] * 100}%`; h.style.top = `${pt[1] * 100}%`;
+    h.onpointerdown = (e) => {
+      e.preventDefault(); h.setPointerCapture(e.pointerId);
+      h.onpointermove = (ev) => {
+        const r = box.getBoundingClientRect();
+        pt[0] = Math.min(1, Math.max(0, (ev.clientX - r.left) / r.width));
+        pt[1] = Math.min(1, Math.max(0, (ev.clientY - r.top) / r.height));
+        h.style.left = `${pt[0] * 100}%`; h.style.top = `${pt[1] * 100}%`;
+        const el = $(`.zone[data-i="${zoneSel}"]`, svg);
+        if (z.length === 2) { const [a, b] = z; el.setAttribute('x', Math.min(a[0], b[0])); el.setAttribute('y', Math.min(a[1], b[1])); el.setAttribute('width', Math.abs(b[0] - a[0])); el.setAttribute('height', Math.abs(b[1] - a[1])); }
+        else el.setAttribute('points', z.map((p) => p.join(',')).join(' '));
+      };
+      h.onpointerup = () => { h.onpointermove = null; buzz(); };
+    };
+    box.appendChild(h);
+  });
+}
+$('#zone-add').onclick = () => {
+  if (zones.length >= 4) { toast('Maximaal 4 zones'); return; }
+  buzz(); const like = zones[0];
+  zones.push(like && like.length > 2 ? [[0.25, 0.45], [0.75, 0.45], [0.85, 0.95], [0.15, 0.95]] : [[0.2, 0.35], [0.8, 0.95]]);
+  zoneSel = zones.length - 1; drawZones(); $('#zone-sub').textContent = 'Sleep de hoeken om de zone aan te passen';
+};
+$('#zone-del').onclick = () => { if (!zones.length) return; buzz(); zones.splice(zoneSel, 1); zoneSel = 0; drawZones(); };
+$('#zone-save').onclick = async () => {
+  buzz(30);
+  try { await post(`/api/zones?dev=${zoneDev.id}`, { zones }); toast('Detectiezones opgeslagen'); $('#zone-editor').hidden = true; }
+  catch (e) { toast(e.message); }
+};
+$('#zone-close').onclick = () => { $('#zone-editor').hidden = true; };
 
 function renderReplyList() {
   const box = $('#reply-list');
@@ -538,52 +740,29 @@ $('#edit-delete').onclick = async () => {
 };
 $('#reply-add').onclick = () => { buzz(); openEditor(null); };
 
-// ---------- learn which event is the doorbell button ----------
-$('#learn-btn').onclick = async () => {
-  buzz(30);
-  const btn = $('#learn-btn'); btn.disabled = true;
-  btn.innerHTML = '<div class="spinner" style="width:18px;height:18px;border-width:2px;border-top-color:currentColor"></div>Luisteren… druk nu op de bel';
-  $('#learn-hint').textContent = 'Loop naar de deur en druk één keer op de bel. Je hebt 90 seconden.';
-  try {
-    status = await post('/api/learn');
-    if (status.learned) { toast('Gelukt! Aanbellen is herkend'); buzz(60);
-      $('#learn-hint').textContent = 'Aanbellen is herkend. Je krijgt nu alleen een melding als er wordt aangebeld.'; }
-    else $('#learn-hint').textContent = 'Er is geen aanbelling gezien. Probeer het nog eens.';
-  } catch (e) { $('#learn-hint').textContent = 'Herkennen lukte niet: ' + e.message; }
-  btn.disabled = false; btn.innerHTML = icon('bell') + 'Aanbellen herkennen';
-  renderSettings();
-};
-
 // ---------- firmware ----------
-let fw = null, fwPoll = null;
-async function loadFirmwareSummary() {
-  try {
-    fw = await api('/api/firmware');
-    $('#fw-sub').textContent = `${fw.model ? fw.model + ' · ' : ''}versie ${fw.current.split(' ')[0] || '?'}`;
-    $('#fw-auto').checked = fw.autoUpdate === true; $('#fw-auto').disabled = fw.autoUpdate === null;
-  } catch (e) { $('#fw-sub').textContent = 'Niet bereikbaar'; }
-}
+let fwPoll = null, fwDev = null;
 function fwHero(cls, ico, title, sub) {
   return `<div class="fw-hero"><span class="big ${cls}">${icon(ico)}</span><b>${title}</b><span>${sub}</span></div>`;
 }
-async function openFirmware() {
+async function openFirmware(devId) {
+  if (devId) fwDev = devId;
   buzz(); openSheet('#sheet-fw');
   const body = $('#fw-body');
-  body.innerHTML = fwHero('', 'refresh', 'Zoeken naar updates…', 'De deurbel vraagt het na bij TP-Link') + '<div class="progress indet"><i></i></div>';
+  body.innerHTML = fwHero('', 'refresh', 'Zoeken naar updates…', 'Het apparaat vraagt het na bij TP-Link') + '<div class="progress indet"><i></i></div>';
   let info;
-  try { info = await api('/api/firmware?check=1'); }
-  catch (e) { body.innerHTML = fwHero('', 'alert', 'Zoeken lukte niet', e.message) + '<button class="btn wide" id="fw-retry">Opnieuw</button>'; $('#fw-retry').onclick = openFirmware; return; }
+  try { info = await api(`/api/firmware?check=1&dev=${fwDev}`); }
+  catch (e) { body.innerHTML = fwHero('', 'alert', 'Zoeken lukte niet', e.message) + '<button class="btn wide" id="fw-retry">Opnieuw</button>'; $('#fw-retry').onclick = () => openFirmware(); return; }
   const cur = info.current.split(' ')[0];
   if (!info.available) {
-    body.innerHTML = fwHero('ok', 'shield', 'Je deurbel is up-to-date', `Versie ${cur}`) +
+    body.innerHTML = fwHero('ok', 'shield', 'Up-to-date', `${(devById(fwDev) || {}).name || ''} · versie ${cur}`) +
       '<button class="btn ghost wide" id="fw-close">Sluiten</button>';
-    $('#fw-close').onclick = closeSheet; $('#fw-badge').hidden = true; return;
+    $('#fw-close').onclick = closeSheet; return;
   }
-  $('#fw-badge').hidden = false;
   const latest = info.latest.split(' ')[0];
   body.innerHTML = fwHero('new', 'download', `Nieuwe versie ${latest}`, `Nu geïnstalleerd: ${cur}`) +
     (info.releaseNote ? `<div class="fw-notes"></div>` : '') +
-    `<div class="fw-warn">${icon('alert')}<span>De deurbel downloadt de update zelf bij TP-Link en start daarna opnieuw op. Hij is dan een paar minuten niet bereikbaar. Haal de stroom er niet af.</span></div>
+    `<div class="fw-warn">${icon('alert')}<span>Het apparaat downloadt de update zelf bij TP-Link en start daarna opnieuw op. Hij is dan een paar minuten niet bereikbaar. Haal de stroom er niet af.</span></div>
      <button class="btn wide" id="fw-install">Nu installeren</button>`;
   if (info.releaseNote) $('.fw-notes', body).textContent = info.releaseNote;
   $('#fw-install').onclick = () => installFirmware(cur, latest);
@@ -591,21 +770,21 @@ async function openFirmware() {
 async function installFirmware(cur, latest) {
   buzz(30);
   const body = $('#fw-body');
-  try { await post('/api/firmware/install'); }
+  try { await post(`/api/firmware/install?dev=${fwDev}`); }
   catch (e) { toast('Installeren mislukt: ' + e.message); return; }
-  body.innerHTML = fwHero('new', 'download', `Bijwerken naar ${latest}…`, 'Laat de deurbel aan de stroom') +
+  body.innerHTML = fwHero('new', 'download', `Bijwerken naar ${latest}…`, 'Laat het apparaat aan de stroom') +
     '<div class="progress indet" id="fw-prog"><i></i></div><p class="foot center" id="fw-state" style="margin:10px 0 0">Downloaden…</p>';
   const started = Date.now();
   clearInterval(fwPoll);
   fwPoll = setInterval(async () => {
     let s = null;
-    try { s = await api('/api/firmware'); } catch (e) { $('#fw-state').textContent = 'De deurbel start opnieuw op…'; }
+    try { s = await api(`/api/firmware?dev=${fwDev}`); } catch (e) { $('#fw-state').textContent = 'Het apparaat start opnieuw op…'; }
     if (s) {
       const now = s.current.split(' ')[0];
       if (now && now !== cur) {
         clearInterval(fwPoll);
-        body.innerHTML = fwHero('ok', 'shield', 'Bijgewerkt!', `De deurbel draait nu versie ${now}`) + '<button class="btn wide" id="fw-done">Klaar</button>';
-        $('#fw-done').onclick = closeSheet; $('#fw-badge').hidden = true; buzz(40); loadFirmwareSummary(); return;
+        body.innerHTML = fwHero('ok', 'shield', 'Bijgewerkt!', `Draait nu versie ${now}`) + '<button class="btn wide" id="fw-done">Klaar</button>';
+        $('#fw-done').onclick = closeSheet; buzz(40); return;
       }
       const st = s.status || {}; const pct = parseInt(st.progress ?? st.percent ?? '', 10);
       if (!isNaN(pct) && pct > 0) { $('#fw-prog').classList.remove('indet'); $('#fw-prog i').style.width = pct + '%'; $('#fw-state').textContent = `${pct}%`; }
@@ -613,13 +792,6 @@ async function installFirmware(cur, latest) {
     if (Date.now() - started > 15 * 60 * 1000) { clearInterval(fwPoll); $('#fw-state').textContent = 'Dit duurt lang. Kijk later nog eens bij Instellingen.'; }
   }, 5000);
 }
-$('#fw-row').onclick = openFirmware;
-$('#fw-auto').onchange = async (e) => {
-  buzz();
-  try { await post('/api/firmware/auto', { on: e.target.checked }); toast(e.target.checked ? 'Automatisch bijwerken staat aan' : 'Automatisch bijwerken staat uit'); }
-  catch (err) { e.target.checked = !e.target.checked; toast(err.message); }
-};
-
 // ---------- first-time setup: link the doorbell ----------
 let setupIp = null, setupShown = false;
 async function showSetup() {

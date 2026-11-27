@@ -142,6 +142,37 @@ class TapoClient(val host: String, private val cloudPassword: String, private va
             .optJSONObject("harddisk_manage")?.optJSONArray("hd_info")
     } catch (e: TapoException) { null }
 
+    // ---- device kind ----
+    /** True for doorbells (Tapo D-series), false for cameras. */
+    fun isDoorbell(info: JSONObject = deviceInfo()): Boolean =
+        info.optString("device_model").uppercase().startsWith("D") || info.optString("device_type").contains("DOORBELL", true)
+
+    // ---- detection zones ----
+    fun detectionZones(): DetectionZones {
+        val r = execute("getDetectionRegion", JSONObject().put("motion_detection", JSONObject().put("table", JSONArray().put("region_info"))))
+        return DetectionZones.parse(r.optJSONObject("motion_detection")?.opt("region_info"))
+    }
+
+    fun setDetectionZones(z: DetectionZones) {
+        execute("setDetectionRegion", JSONObject().put("motion_detection", JSONObject().put("region_info", z.toRegionInfo())))
+    }
+
+    // ---- recording (energy / storage) ----
+    /** True when every day is set to record on events only (":2"), false when it records continuously somewhere. */
+    fun recordsEventsOnly(): Boolean? = try {
+        val plan = execute("getRecordPlan", JSONObject().put("record_plan", JSONObject().put("name", JSONArray().put("chn1_channel"))))
+            .optJSONObject("record_plan")?.optJSONObject("chn1_channel")
+        plan?.let { p -> DAYS.none { (p.optString(it)).contains(":1") } }
+    } catch (e: TapoException) { null }
+
+    /** Records only when something happens (saves SD-card space and energy). */
+    fun setRecordEventsOnly(eventsOnly: Boolean) {
+        val plan = JSONObject().put("enabled", "on")
+        val day = JSONArray().put(if (eventsOnly) "0000-2400:2" else "0000-2400:1").toString()
+        DAYS.forEach { plan.put(it, day) }
+        execute("setRecordPlan", JSONObject().put("record_plan", JSONObject().put("chn1_channel", plan)))
+    }
+
     // ---- battery / power ----
     /**
      * Battery and power information. Different Tapo models report this in different
@@ -194,14 +225,18 @@ class TapoClient(val host: String, private val cloudPassword: String, private va
             .optJSONObject("auto_upgrade")?.optJSONObject("common")?.optString("enabled")?.let { it == "on" }
     } catch (e: TapoException) { null }
 
-    fun setAutoUpgrade(on: Boolean) {
-        execute("setFirmwareAutoUpgradeConfig", JSONObject().put("auto_upgrade", JSONObject().put("common",
-            JSONObject().put("enabled", if (on) "on" else "off").put("random_range", 120))))
+    /** Lets the device install updates itself at [time] ("HH:mm", local time of the device). */
+    fun setAutoUpgrade(on: Boolean, time: String? = null) {
+        val p = JSONObject().put("enabled", if (on) "on" else "off").put("random_range", 120)
+        if (time != null) p.put("time", time)
+        execute("setFirmwareAutoUpgradeConfig", JSONObject().put("auto_upgrade", JSONObject().put("common", p)))
     }
 
     fun mediaSession(): MediaSession = MediaSession(host, cloudPassword, preferSha256)
 
     companion object {
+        private val DAYS = listOf("sunday", "monday", "tuesday", "wednesday", "thursday", "friday", "saturday")
+
         /** True when upgrade_info describes a newer firmware than [current]. */
         fun firmwareAvailable(info: JSONObject, current: String): Boolean {
             val version = info.optString("version")

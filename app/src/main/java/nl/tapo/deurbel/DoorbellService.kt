@@ -44,10 +44,11 @@ class DoorbellService : Service() {
         }
         if (intent?.action == ACTION_REPLY) {
             val id = intent.getStringExtra(EXTRA_ID)
-            getSystemService(NotificationManager::class.java).cancel(NOTIF_RING)
+            val dev = intent.getStringExtra(EXTRA_DEV)
+            getSystemService(NotificationManager::class.java).cancelAll()
             scope.launch {
                 try {
-                    Responses.list(this@DoorbellService).firstOrNull { it.id == id }?.let { Responses.sendToDoor(this@DoorbellService, it) }
+                    Responses.list(this@DoorbellService).firstOrNull { it.id == id }?.let { Responses.sendToDoor(this@DoorbellService, it, dev) }
                 } catch (e: Exception) {
                     setStatus("Antwoord versturen mislukt: ${Camera.friendly(e)}")
                 }
@@ -73,23 +74,25 @@ class DoorbellService : Service() {
         }
     }
 
-    private var lastPower: nl.tapo.deurbel.core.PowerInfo? = null
-    private var lastPowerCheck = 0L
+    private val lastPower = java.util.concurrent.ConcurrentHashMap<String, nl.tapo.deurbel.core.PowerInfo>()
+    private val devStatus = java.util.concurrent.ConcurrentHashMap<String, String>()
 
-    /** Warns when the battery is almost empty or the doorbell stops getting mains power. */
-    private fun checkPower(c: nl.tapo.deurbel.core.TapoClient) {
+    /** Warns when the battery is almost empty or a device stops getting mains/solar power. */
+    private fun checkPower(d: Dev, c: nl.tapo.deurbel.core.TapoClient) {
         val p = try { c.power() } catch (_: Exception) { return }
-        val before = lastPower
-        lastPower = p
+        val before = lastPower[d.id]
+        lastPower[d.id] = p
+        getSharedPreferences("deurbel", MODE_PRIVATE).edit().putBoolean("dev.${d.id}.on_battery", p.hasBattery && p.external != true).apply()
+        val idx = Prefs(this).devices.indexOfFirst { it.id == d.id }
         if (before?.external == true && p.external == false) {
-            notifyInfo(3, "Deurbel krijgt geen stroom meer",
-                "De deurbel draait nu op de batterij" + (p.percent?.let { " ($it%)" } ?: "") + ". Controleer de netvoeding.")
+            notifyInfo(300 + idx, "${d.name} krijgt geen stroom meer",
+                "Draait nu op de batterij" + (p.percent?.let { " ($it%)" } ?: "") + ". Controleer de voeding.")
         }
         if (p.low && p.charging != true) {
             val sp = getSharedPreferences("deurbel", MODE_PRIVATE)
-            if (System.currentTimeMillis() - sp.getLong("low_batt", 0) > 12 * 3600_000L) {
-                sp.edit().putLong("low_batt", System.currentTimeMillis()).apply()
-                notifyInfo(4, "Batterij deurbel bijna leeg", "Nog ${p.percent}%. Laad de deurbel op of controleer de netvoeding.")
+            if (System.currentTimeMillis() - sp.getLong("low_batt_${d.id}", 0) > 12 * 3600_000L) {
+                sp.edit().putLong("low_batt_${d.id}", System.currentTimeMillis()).apply()
+                notifyInfo(400 + idx, "Batterij ${d.name} bijna leeg", "Nog ${p.percent}%. Laad op of controleer de voeding.")
             }
         }
     }
@@ -102,38 +105,71 @@ class DoorbellService : Service() {
         try { getSystemService(NotificationManager::class.java).notify(id, n) } catch (_: SecurityException) { }
     }
 
-    private suspend fun pollLoop() {
+    /** One watcher per device; all stop when the service stops. */
+    private suspend fun pollLoop() = kotlinx.coroutines.coroutineScope {
+        Prefs(this@DoorbellService).devices.forEach { d -> launch { deviceLoop(d) } }
+    }
+
+    private fun onBattery(d: Dev) = lastPower[d.id]?.let { it.hasBattery && it.external != true } ?: false
+
+    private suspend fun deviceLoop(d0: Dev) {
+        var d = d0
         val seen = HashMap<String, Long>()
         var primed = false
+        var lastPowerCheck = 0L
+        var configured = false
         while (scope.isActive) {
             try {
-                val c = Camera.client(this)
+                val c = Camera.client(this, d.id)
+                if (!configured) {
+                    configured = true
+                    try {
+                        val info = c.deviceInfo()
+                        val kind = if (c.isDoorbell(info)) "doorbell" else "camera"
+                        if (kind != d.kind) { d = d.copy(kind = kind); Prefs(this).updateDevice(d) }
+                    } catch (_: Exception) {}
+                    Camera.applyAutoUpdate(this, c)
+                }
                 val corr = c.timeCorrection()
                 val camNow = System.currentTimeMillis() / 1000 - corr
-                val events = c.events(camNow - 300, camNow + 60)
-                val prefs = Prefs(this)
-                for (e in events) {
+                val prefs = Prefs(this, d.id)
+                for (e in c.events(camNow - 300, camNow + 60)) {
                     val key = "${e.startTime}/${e.type}"
                     if (seen.containsKey(key)) continue
                     seen[key] = e.startTime
-                    if (e.type.isNotEmpty() && e.type !in prefs.seenTypes) prefs.seenTypes = prefs.seenTypes + e.type
-                    if (e.type.isNotEmpty()) prefs.typeStats = nl.tapo.deurbel.core.EventTypes.record(prefs.typeStats, e.type, e.startTime + corr)
-                    if (primed && (prefs.ringTypes.isEmpty() || e.type in prefs.ringTypes)) {
-                        notifyRing(e.startTime + corr, e.type)
+                    if (e.type.isNotEmpty()) {
+                        if (e.type !in prefs.seenTypes) prefs.seenTypes = prefs.seenTypes + e.type
+                        prefs.typeStats = nl.tapo.deurbel.core.EventTypes.record(prefs.typeStats, e.type, e.startTime + corr)
                     }
+                    if (primed && (prefs.ringTypes.isEmpty() || e.type in prefs.ringTypes)) notifyRing(d, e.startTime + corr, e.type)
                 }
                 seen.entries.removeIf { it.value < camNow - 900 }
                 primed = true
-                if (System.currentTimeMillis() - lastPowerCheck > 5 * 60_000) { lastPowerCheck = System.currentTimeMillis(); checkPower(c) }
-                setStatus("Luistert naar de deurbel" + (lastPower?.takeIf { it.hasBattery }?.let { " · batterij ${it.percent}%" } ?: ""))
-                delay(POLL_MS)
+                val powerEvery = if (onBattery(d)) 30 * 60_000 else 5 * 60_000
+                if (System.currentTimeMillis() - lastPowerCheck > powerEvery) { lastPowerCheck = System.currentTimeMillis(); checkPower(d, c) }
+                devStatus[d.id] = "ok"
+                updateStatus()
+                // battery cameras sleep: asking every few seconds would drain them
+                delay(if (onBattery(d)) 60_000 else POLL_MS)
             } catch (e: Exception) {
                 if (e is kotlinx.coroutines.CancellationException) throw e
-                setStatus("Geen verbinding: ${Camera.friendly(e)}")
-                if (e is nl.tapo.deurbel.core.TapoException) Camera.reset()
-                delay(10_000)
+                devStatus[d.id] = "${d.name}: ${Camera.friendly(e)}"
+                updateStatus()
+                if (e is nl.tapo.deurbel.core.TapoException) Camera.reset(d.id)
+                delay(if (onBattery(d)) 120_000 else 10_000)
             }
         }
+    }
+
+    private fun updateStatus() {
+        val devs = Prefs(this).devices
+        val errors = devs.mapNotNull { devStatus[it.id]?.takeIf { s -> s != "ok" } }
+        val batt = devs.mapNotNull { d -> lastPower[d.id]?.takeIf { it.hasBattery }?.let { "${d.name} ${it.percent}%" } }
+        setStatus(when {
+            errors.isNotEmpty() -> "Geen verbinding – " + errors.joinToString("; ")
+            devs.size == 1 -> "Luistert naar ${devs[0].name}" + (batt.firstOrNull()?.let { " · batterij ${it.substringAfterLast(' ')}" } ?: "")
+            else -> "Luistert naar ${devs.size} apparaten" + if (batt.isNotEmpty()) " · " + batt.joinToString(", ") else ""
+        })
     }
 
     private fun setStatus(s: String) {
@@ -142,10 +178,11 @@ class DoorbellService : Service() {
         getSystemService(NotificationManager::class.java).notify(NOTIF_STATUS, statusNotification(s))
     }
 
-    private fun openApp(ring: Boolean): PendingIntent {
+    private fun openApp(ring: Boolean, devId: String? = null): PendingIntent {
         val i = Intent(this, MainActivity::class.java).addFlags(Intent.FLAG_ACTIVITY_NEW_TASK or Intent.FLAG_ACTIVITY_SINGLE_TOP)
-            .putExtra(MainActivity.EXTRA_RING, ring)
-        return PendingIntent.getActivity(this, if (ring) 1 else 0, i, PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
+            .putExtra(MainActivity.EXTRA_RING, ring).putExtra(MainActivity.EXTRA_DEV, devId)
+        return PendingIntent.getActivity(this, if (ring) 1 + (devId?.removePrefix("d")?.toIntOrNull() ?: 0) else 0, i,
+            PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
     }
 
     private fun statusNotification(text: String): Notification =
@@ -157,32 +194,33 @@ class DoorbellService : Service() {
             .setContentIntent(openApp(false))
             .build()
 
-    private fun notifyRing(whenSec: Long, type: String) {
-        val label = Prefs(this).typeLabels.optString(type)
+    private fun notifyRing(d: Dev, whenSec: Long, type: String) {
+        val label = Prefs(this, d.id).typeLabels.optString(type)
+        val multi = Prefs(this).devices.size > 1
         val b = NotificationCompat.Builder(this, DeurbelApp.CH_RING)
             .setSmallIcon(R.drawable.ic_stat_bell)
-            .setContentTitle(when (label) {
+            .setContentTitle((if (multi) "${d.name}: " else "") + when (label) {
                 "ring" -> "Er wordt aangebeld"
-                "", "person" -> "Er staat iemand voor de deur"
-                else -> nl.tapo.deurbel.core.EventTypes.LABELS[label] ?: "Er staat iemand voor de deur"
+                "", "person" -> if (d.isDoorbell) "Er staat iemand voor de deur" else "Iemand gezien"
+                else -> nl.tapo.deurbel.core.EventTypes.LABELS[label] ?: "Gebeurtenis"
             })
-            .setContentText("Tik om te kijken wie het is")
+            .setContentText("Tik om te kijken")
             .setWhen(whenSec * 1000)
             .setShowWhen(true)
             .setPriority(NotificationCompat.PRIORITY_MAX)
             .setCategory(NotificationCompat.CATEGORY_CALL)
             .setAutoCancel(true)
             .setTimeoutAfter(90_000)
-            .setContentIntent(openApp(true))
-            .setFullScreenIntent(openApp(true), true)
+            .setContentIntent(openApp(true, d.id))
+            .setFullScreenIntent(openApp(true, d.id), true)
         Responses.list(this).take(2).forEachIndexed { i, r ->
             val pi = PendingIntent.getForegroundService(this, 10 + i,
-                Intent(this, DoorbellService::class.java).setAction(ACTION_REPLY).putExtra(EXTRA_ID, r.id),
+                Intent(this, DoorbellService::class.java).setAction(ACTION_REPLY).putExtra(EXTRA_ID, r.id).putExtra(EXTRA_DEV, d.id),
                 PendingIntent.FLAG_UPDATE_CURRENT or PendingIntent.FLAG_IMMUTABLE)
             b.addAction(0, r.text.take(25), pi)
         }
         try {
-            getSystemService(NotificationManager::class.java).notify(NOTIF_RING, b.build())
+            getSystemService(NotificationManager::class.java).notify(NOTIF_RING + Prefs(this).devices.indexOfFirst { it.id == d.id }, b.build())
         } catch (_: SecurityException) { }
     }
 
@@ -200,6 +238,7 @@ class DoorbellService : Service() {
         private const val POLL_MS = 3000L
         const val ACTION_REPLY = "nl.tapo.deurbel.REPLY"
         const val EXTRA_ID = "id"
+        const val EXTRA_DEV = "dev"
 
         /** Starts or stops listening according to the settings. */
         fun sync(context: Context) {

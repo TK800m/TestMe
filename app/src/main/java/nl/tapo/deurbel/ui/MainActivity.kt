@@ -41,6 +41,7 @@ import nl.tapo.deurbel.Prefs
 class MainActivity : ComponentActivity() {
     private var tab by mutableIntStateOf(0)
     private var themeMode by mutableStateOf("system")
+    private var devId by mutableStateOf("")
 
     private val notifPermission = registerForActivityResult(ActivityResultContracts.RequestPermission()) { }
 
@@ -48,6 +49,8 @@ class MainActivity : ComponentActivity() {
         super.onCreate(savedInstanceState)
         val prefs = Prefs(this)
         themeMode = prefs.theme
+        devId = prefs.currentId
+        nl.tapo.deurbel.Clips.cleanup(this)
         tab = if (prefs.configured) 0 else 3
         handle(intent)
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
@@ -61,7 +64,13 @@ class MainActivity : ComponentActivity() {
     }
 
     private fun handle(i: Intent?) {
+        i?.getStringExtra(EXTRA_DEV)?.let { selectDevice(it) }
         if (i?.getBooleanExtra(EXTRA_RING, false) == true && Prefs(this).configured) tab = 0
+    }
+
+    private fun selectDevice(id: String) {
+        val p = Prefs(this)
+        if (p.devices.any { it.id == id }) { p.currentId = id; devId = id }
     }
 
     @Composable
@@ -98,13 +107,15 @@ class MainActivity : ComponentActivity() {
                 }
             }) { pad ->
                 Box(Modifier.fillMaxSize().padding(pad)) {
-                    when (tab) {
-                        0 -> LiveScreen()
-                        1 -> ClipsScreen()
+                    // everything below is rebuilt when another device is chosen
+                    androidx.compose.runtime.key(devId) { when (tab) {
+                        0 -> LiveScreen(onSelectDevice = ::selectDevice)
+                        1 -> ClipsScreen(onSelectDevice = ::selectDevice)
                         2 -> ResponsesScreen()
                         else -> SettingsScreen(onSaved = { tab = 0 }, theme = themeMode,
-                            onTheme = { themeMode = it; Prefs(this@MainActivity).theme = it })
-                    }
+                            onTheme = { themeMode = it; Prefs(this@MainActivity).theme = it },
+                            onDevicesChanged = { devId = Prefs(this@MainActivity).currentId })
+                    } }
                 }
             }
         } }
@@ -112,5 +123,6 @@ class MainActivity : ComponentActivity() {
 
     companion object {
         const val EXTRA_RING = "ring"
+        const val EXTRA_DEV = "dev"
     }
 }

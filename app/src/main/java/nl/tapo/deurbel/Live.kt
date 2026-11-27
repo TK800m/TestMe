@@ -30,6 +30,7 @@ import nl.tapo.deurbel.core.TalkSession
 class LiveDataSource(
     private val context: Context,
     private val hd: Boolean,
+    private val devId: String?,
     private val audio: (ShortArray) -> Unit,
 ) : BaseDataSource(true) {
     private var stream: LiveStream? = null
@@ -39,7 +40,7 @@ class LiveDataSource(
     override fun open(dataSpec: DataSpec): Long {
         uri = dataSpec.uri
         transferInitializing(dataSpec)
-        val c = Camera.client(context)
+        val c = Camera.client(context, devId)
         Camera.loadAudioFormat(c)
         stream = LiveStream(c, hd, Camera.audioUlaw, audio)
         opened = true
@@ -94,21 +95,21 @@ class VisitorAudio {
 }
 
 object LivePlayer {
-    fun create(context: Context, visitor: VisitorAudio): ExoPlayer {
+    fun create(context: Context, visitor: VisitorAudio, devId: String? = null): ExoPlayer {
         val loadControl = DefaultLoadControl.Builder()
             .setBufferDurationsMs(300, 2000, 200, 200)
             .setPrioritizeTimeOverSizeThresholds(true)
             .build()
         val player = ExoPlayer.Builder(context).setLoadControl(loadControl).build()
-        player.setMediaSource(source(context, visitor))
+        player.setMediaSource(source(context, visitor, devId))
         player.volume = 1f
         player.playWhenReady = true
         player.prepare()
         return player
     }
 
-    private fun source(context: Context, visitor: VisitorAudio): MediaSource {
-        val p = Prefs(context)
+    private fun source(context: Context, visitor: VisitorAudio, devId: String?): MediaSource {
+        val p = Prefs(context, devId)
         if (p.rtspUser.isNotBlank()) {
             val u = Uri.encode(p.rtspUser); val pw = Uri.encode(p.rtspPassword)
             val stream = if (p.hdLive) "stream1" else "stream2"
@@ -116,7 +117,7 @@ object LivePlayer {
                 .createMediaSource(MediaItem.fromUri("rtsp://$u:$pw@${p.host}:554/$stream"))
         }
         val hd = p.hdLive
-        val factory = DataSource.Factory { LiveDataSource(context.applicationContext, hd) { visitor.feed(it) } }
+        val factory = DataSource.Factory { LiveDataSource(context.applicationContext, hd, devId) { visitor.feed(it) } }
         val extractors = DefaultExtractorsFactory()
             .setTsExtractorFlags(DefaultTsPayloadReaderFactory.FLAG_ALLOW_NON_IDR_KEYFRAMES)
         return ProgressiveMediaSource.Factory(factory, extractors)

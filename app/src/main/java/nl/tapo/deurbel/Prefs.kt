@@ -9,22 +9,72 @@ import javax.crypto.Cipher
 import javax.crypto.KeyGenerator
 import javax.crypto.SecretKey
 import javax.crypto.spec.GCMParameterSpec
+import org.json.JSONArray
+import org.json.JSONObject
 
-/** App settings. The TP-Link password is encrypted with a key in the Android Keystore. */
-class Prefs(context: Context) {
+/** One doorbell or camera. */
+data class Dev(val id: String, val name: String, val host: String, val kind: String) {
+    val isDoorbell get() = kind != "camera"
+}
+
+/**
+ * App settings. The TP-Link password is encrypted with a key in the Android Keystore.
+ * Device-specific settings are stored per device ("dev.<id>.<key>"); [devId] picks the
+ * device, null means the device currently shown in the app.
+ */
+class Prefs(context: Context, private val devId: String? = null) {
     private val sp = context.getSharedPreferences("deurbel", Context.MODE_PRIVATE)
 
-    var host: String
-        get() = sp.getString("host", "") ?: ""
-        set(v) = sp.edit().putString("host", v.trim()).apply()
+    init { migrate() }
+
+    /** Older versions had one doorbell; move its settings to device "d1". */
+    private fun migrate() {
+        if (sp.contains("devices")) return
+        val host = sp.getString("host", "") ?: ""
+        val e = sp.edit()
+        if (host.isNotBlank()) {
+            e.putString("devices", JSONArray().put(JSONObject().put("id", "d1").put("name", "Voordeur").put("host", host).put("kind", "doorbell")).toString())
+            e.putString("current", "d1")
+            sp.getString("pin", null)?.let { e.putString("dev.d1.pin", it) }
+            listOf("ring_types", "seen_types", "hidden").forEach { k -> sp.getStringSet(k, null)?.let { e.putStringSet("dev.d1.$k", it) } }
+            listOf("type_stats", "type_labels").forEach { k -> sp.getString(k, null)?.let { e.putString("dev.d1.$k", it) } }
+        } else e.putString("devices", "[]")
+        e.apply()
+    }
+
+    // ---- devices ----
+    var devices: List<Dev>
+        get() = JSONArray(sp.getString("devices", "[]") ?: "[]").let { a ->
+            (0 until a.length()).map { a.getJSONObject(it) }.map { Dev(it.getString("id"), it.optString("name", "Apparaat"), it.getString("host"), it.optString("kind", "doorbell")) }
+        }
+        set(v) = sp.edit().putString("devices", JSONArray(v.map { JSONObject().put("id", it.id).put("name", it.name).put("host", it.host).put("kind", it.kind) }).toString()).apply()
+
+    var currentId: String
+        get() = sp.getString("current", null)?.takeIf { id -> devices.any { it.id == id } } ?: devices.firstOrNull()?.id ?: ""
+        set(v) = sp.edit().putString("current", v).apply()
+
+    private val id get() = devId ?: currentId
+    val device: Dev? get() = devices.firstOrNull { it.id == id }
+
+    fun newDeviceId() = "d" + (1 + (devices.maxOfOrNull { it.id.removePrefix("d").toIntOrNull() ?: 0 } ?: 0))
+    fun updateDevice(d: Dev) { devices = devices.map { if (it.id == d.id) d else it } }
+    fun removeDevice(rid: String) {
+        devices = devices.filter { it.id != rid }
+        val e = sp.edit(); sp.all.keys.filter { it.startsWith("dev.$rid.") }.forEach { e.remove(it) }; e.apply()
+    }
+
+    private fun k(key: String) = "dev.$id.$key"
+
+    /** Address of the current device. */
+    val host: String get() = device?.host ?: ""
 
     var password: String
         get() = sp.getString("pw", null)?.let { SecretBox.decrypt(it) } ?: ""
         set(v) = sp.edit().putString("pw", SecretBox.encrypt(v)).apply()
 
     var certPin: String?
-        get() = sp.getString("pin", null)
-        set(v) = sp.edit().putString("pin", v).apply()
+        get() = sp.getString(k("pin"), null)
+        set(v) = sp.edit().putString(k("pin"), v).apply()
 
     var notifications: Boolean
         get() = sp.getBoolean("notify", true)
@@ -32,22 +82,26 @@ class Prefs(context: Context) {
 
     /** Event types that trigger a notification; empty = every event. */
     var ringTypes: Set<String>
-        get() = sp.getStringSet("ring_types", emptySet()) ?: emptySet()
-        set(v) = sp.edit().putStringSet("ring_types", v).apply()
+        get() = sp.getStringSet(k("ring_types"), emptySet()) ?: emptySet()
+        set(v) = sp.edit().putStringSet(k("ring_types"), v).apply()
 
     /** Per event type: how often and when it was last seen (JSON). */
-    var typeStats: org.json.JSONObject
-        get() = org.json.JSONObject(sp.getString("type_stats", "{}") ?: "{}")
-        set(v) = sp.edit().putString("type_stats", v.toString()).apply()
+    var typeStats: JSONObject
+        get() = JSONObject(sp.getString(k("type_stats"), "{}") ?: "{}")
+        set(v) = sp.edit().putString(k("type_stats"), v.toString()).apply()
 
     /** Per event type: label key chosen by the user or learnt (JSON, see EventTypes.LABELS). */
-    var typeLabels: org.json.JSONObject
-        get() = org.json.JSONObject(sp.getString("type_labels", "{}") ?: "{}")
-        set(v) = sp.edit().putString("type_labels", v.toString()).apply()
+    var typeLabels: JSONObject
+        get() = JSONObject(sp.getString(k("type_labels"), "{}") ?: "{}")
+        set(v) = sp.edit().putString(k("type_labels"), v.toString()).apply()
 
     var seenTypes: Set<String>
-        get() = sp.getStringSet("seen_types", emptySet()) ?: emptySet()
-        set(v) = sp.edit().putStringSet("seen_types", v).apply()
+        get() = sp.getStringSet(k("seen_types"), emptySet()) ?: emptySet()
+        set(v) = sp.edit().putStringSet(k("seen_types"), v).apply()
+
+    var hiddenClips: Set<String>
+        get() = sp.getStringSet(k("hidden"), emptySet()) ?: emptySet()
+        set(v) = sp.edit().putStringSet(k("hidden"), v).apply()
 
     /** "system", "light" or "dark". */
     var theme: String
@@ -66,15 +120,20 @@ class Prefs(context: Context) {
         get() = sp.getString("rtsp_pw", null)?.let { SecretBox.decrypt(it) } ?: ""
         set(v) = sp.edit().putString("rtsp_pw", SecretBox.encrypt(v)).apply()
 
-    var hiddenClips: Set<String>
-        get() = sp.getStringSet("hidden", emptySet()) ?: emptySet()
-        set(v) = sp.edit().putStringSet("hidden", v).apply()
-
     var responsesJson: String?
         get() = sp.getString("responses", null)
         set(v) = sp.edit().putString("responses", v).apply()
 
-    val configured get() = host.isNotBlank() && password.isNotBlank()
+    /** Firmware updates installed by the devices themselves at [autoUpdateTime] (local time). */
+    var autoUpdate: Boolean
+        get() = sp.getBoolean("auto_update", true)
+        set(v) = sp.edit().putBoolean("auto_update", v).apply()
+
+    var autoUpdateTime: String
+        get() = sp.getString("auto_update_time", "01:00") ?: "01:00"
+        set(v) = sp.edit().putString("auto_update_time", v).apply()
+
+    val configured get() = password.isNotBlank() && devices.isNotEmpty()
 }
 
 private object SecretBox {
