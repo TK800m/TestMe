@@ -153,8 +153,49 @@ class TapoClient(val host: String, private val cloudPassword: String, private va
         return DetectionZones.parse(r.optJSONObject("motion_detection")?.opt("region_info"))
     }
 
-    fun setDetectionZones(z: DetectionZones) {
-        execute("setDetectionRegion", JSONObject().put("motion_detection", JSONObject().put("region_info", z.toRegionInfo())))
+    class ZoneSaveException(msg: String, val details: String) : Exception(msg)
+
+    /**
+     * Saves the zones. Tapo firmware has no single "set" for zones: the Tapo app adds new
+     * regions ("addDetectionRegion" / add_md_regions) and removes old ones. To never leave the
+     * doorbell without zones, the new zones are added first and the old ones removed after.
+     * Every attempt is logged so problems can be diagnosed.
+     */
+    fun setDetectionZones(z: DetectionZones, old: DetectionZones) {
+        val log = StringBuilder()
+        fun attempt(label: String, block: () -> JSONObject): Boolean = try {
+            val r = block(); log.append("$label → ok\n"); true
+        } catch (e: TapoException) { log.append("$label → ${e.code ?: e.message}\n"); false }
+        val md = { o: JSONObject -> JSONObject().put("motion_detection", o) }
+        val regions = z.toRegionInfo()
+        val plain = JSONArray((0 until regions.length()).map { i ->
+            regions.getJSONObject(i).let { o -> o.keys().asSequence().toList().let { k -> if (k.size == 1 && o.optJSONObject(k[0]) != null) o.getJSONObject(k[0]) else o } }
+        })
+
+        // 1. some firmware accepts a full replacement
+        if (attempt("setDetectionRegion") { execute("setDetectionRegion", md(JSONObject().put("region_info", regions))) }) return
+
+        // 2. add the new zones (all at once, else one by one)
+        var added = attempt("addDetectionRegion[]") { execute("addDetectionRegion", md(JSONObject().put("add_md_regions", plain))) }
+        if (!added && plain.length() > 0) {
+            added = (0 until plain.length()).all { i ->
+                attempt("addDetectionRegion #${i + 1}") { execute("addDetectionRegion", md(JSONObject().put("add_md_regions", plain.getJSONObject(i)))) }
+            }
+        }
+        if (!added && plain.length() > 0) {
+            throw ZoneSaveException("De deurbel accepteerde de nieuwe zone niet. Er is niets gewijzigd.", log.toString())
+        }
+
+        // 3. remove the old zones (they keep the first positions)
+        if (old.zones.isEmpty()) return
+        val n = old.zones.size
+        val idx = JSONArray((1..n).map { it.toString() })
+        val names = JSONArray(old.zones.mapIndexed { i, zz -> zz.wrapKeyOrNull() ?: "region_info_${i + 1}" })
+        val removed = attempt("deleteDetectionRegion index") { execute("deleteDetectionRegion", md(JSONObject().put("delete_md_regions", JSONObject().put("index", idx)))) } ||
+            attempt("deleteDetectionRegion name") { execute("deleteDetectionRegion", md(JSONObject().put("delete", JSONObject().put("name", names)))) } ||
+            attempt("deleteDetectionRegion list") { execute("deleteDetectionRegion", md(JSONObject().put("delete_md_regions", idx))) }
+        if (!removed) throw ZoneSaveException(
+            "De nieuwe zone is toegevoegd, maar de oude kon niet worden verwijderd. Verwijder de oude zone in de Tapo-app.", log.toString())
     }
 
     // ---- recording (energy / storage) ----

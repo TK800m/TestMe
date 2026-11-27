@@ -67,6 +67,7 @@ fun ZoneEditor(devId: String, doorbell: Boolean, onClose: () -> Unit) {
     val zones = remember { mutableStateListOf<List<Pair<Double, Double>>>() }
     var selected by remember { mutableIntStateOf(0) }
     var message by remember { mutableStateOf("Zones ophalen…") }
+    var details by remember { mutableStateOf<String?>(null) }
     val accent = MaterialTheme.colorScheme.primary
 
     LaunchedEffect(devId) {
@@ -75,7 +76,7 @@ fun ZoneEditor(devId: String, doorbell: Boolean, onClose: () -> Unit) {
             original = z; zones.clear(); zones.addAll(z.zones.map { it.points })
             message = if (zones.isEmpty()) "Nog geen zones: het hele beeld telt. Tik op \"Zone erbij\"." else "Sleep de hoeken om de zone aan te passen."
         } catch (e: Exception) {
-            message = "Dit apparaat ondersteunt detectiezones niet via de lokale verbinding (${Camera.friendly(e)})"
+            message = "Zones ophalen lukte niet: ${Camera.friendly(e)}" + ((e as? nl.tapo.deurbel.core.TapoException)?.code?.let { " (code $it)" } ?: "")
         }
     }
 
@@ -157,6 +158,13 @@ fun ZoneEditor(devId: String, doorbell: Boolean, onClose: () -> Unit) {
                 }
             }
         }
+        details?.let { d ->
+            OutlinedButton(onClick = {
+                val cm = ctx.getSystemService(android.content.ClipboardManager::class.java)
+                cm.setPrimaryClip(android.content.ClipData.newPlainText("Detectiezones", "Tapo ${Camera.client(ctx, devId).host}\n$d"))
+                message = "Technische details gekopieerd – plak ze in een bericht aan de ontwikkelaar"
+            }, modifier = Modifier.fillMaxWidth()) { Text("Technische details kopiëren", color = Color.White) }
+        }
         Text("Alleen beweging binnen de zones geeft een melding en opname. Kleiner = minder onnodige meldingen en minder energie.",
             color = Color(0xFF9AA1AB), style = MaterialTheme.typography.bodySmall, textAlign = TextAlign.Center, modifier = Modifier.fillMaxWidth())
         Row(horizontalArrangement = Arrangement.spacedBy(10.dp), modifier = Modifier.fillMaxWidth()) {
@@ -176,9 +184,11 @@ fun ZoneEditor(devId: String, doorbell: Boolean, onClose: () -> Unit) {
                             val list = zones.mapIndexed { i, pts ->
                                 o.zones.getOrNull(i)?.takeIf { it.points.size == pts.size }?.moved(pts) ?: DetectionZones.Zone(pts, null, null)
                             }
-                            Camera.client(ctx, devId).setDetectionZones(o.withZones(list))
+                            Camera.client(ctx, devId).setDetectionZones(o.withZones(list), o)
                         }
                         onClose(); "Opgeslagen"
+                    } catch (e: nl.tapo.deurbel.core.TapoClient.ZoneSaveException) {
+                        details = e.details; e.message ?: "Opslaan lukte niet"
                     } catch (e: Exception) { "Opslaan lukte niet: ${Camera.friendly(e)}" }
                 }
             }) { Text("Opslaan") }

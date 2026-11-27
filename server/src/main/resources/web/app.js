@@ -642,8 +642,11 @@ $('#zone-add').onclick = () => {
 $('#zone-del').onclick = () => { if (!zones.length) return; buzz(); zones.splice(zoneSel, 1); zoneSel = 0; drawZones(); };
 $('#zone-save').onclick = async () => {
   buzz(30);
-  try { await post(`/api/zones?dev=${zoneDev.id}`, { zones }); toast('Detectiezones opgeslagen'); $('#zone-editor').hidden = true; }
-  catch (e) { toast(e.message); }
+  const r = await fetch(`/api/zones?dev=${zoneDev.id}`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ zones }) });
+  const data = await r.json().catch(() => ({}));
+  if (r.ok) { toast('Detectiezones opgeslagen'); $('#zone-editor').hidden = true; return; }
+  $('#zone-sub').textContent = data.error || 'Opslaan lukte niet';
+  if (data.details) toast(data.error || 'Opslaan lukte niet', 'Details kopiëren', () => navigator.clipboard && navigator.clipboard.writeText(data.details).then(() => toast('Gekopieerd – stuur dit naar de ontwikkelaar')));
 };
 $('#zone-close').onclick = () => { $('#zone-editor').hidden = true; };
 

@@ -14,6 +14,7 @@ class DetectionZones(val zones: List<Zone>, private val template: JSONObject?, p
         /** Two points = rectangle (opposite corners), more = polygon. */
         val isRectangle get() = points.size == 2
         fun moved(newPoints: List<Pair<Double, Double>>) = Zone(newPoints, raw, wrapKey)
+        fun wrapKeyOrNull(): String? = wrapKey
     }
 
     fun withZones(z: List<Zone>) = DetectionZones(z, template, wrapped)

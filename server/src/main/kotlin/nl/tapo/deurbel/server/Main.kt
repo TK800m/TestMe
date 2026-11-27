@@ -308,7 +308,7 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
             }
             path == "/api/zones" && m == "GET" -> {
                 val z = try { dev().client().detectionZones() } catch (e: nl.tapo.deurbel.core.TapoException) {
-                    throw HttpError(400, "Dit apparaat ondersteunt detectiezones niet via de lokale verbinding")
+                    throw HttpError(400, "Zones ophalen lukte niet (code ${e.code ?: "?"}: ${e.message})")
                 }
                 json(ex, 200, JSONObject().put("zones", JSONArray(z.zones.map { zone ->
                     JSONArray(zone.points.map { (x, y) -> JSONArray().put(x).put(y) })
@@ -317,7 +317,7 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
             path == "/api/zones" && m == "POST" -> {
                 val c = dev().client()
                 val current = try { c.detectionZones() } catch (e: nl.tapo.deurbel.core.TapoException) {
-                    throw HttpError(400, "Dit apparaat ondersteunt detectiezones niet via de lokale verbinding")
+                    throw HttpError(400, "Zones ophalen lukte niet (code ${e.code ?: "?"}: ${e.message})")
                 }
                 val arr = body(ex).getJSONArray("zones")
                 val zones = (0 until arr.length()).map { i ->
@@ -325,8 +325,10 @@ class Api(private val store: Store, private val app: App, private val go2rtc: St
                     current.zones.getOrNull(i)?.takeIf { it.points.size == pts.size }?.moved(pts)
                         ?: nl.tapo.deurbel.core.DetectionZones.Zone(pts, null, null)
                 }
-                try { c.setDetectionZones(current.withZones(zones)) } catch (e: nl.tapo.deurbel.core.TapoException) {
-                    throw HttpError(400, "Opslaan lukte niet: ${e.message}")
+                try { c.setDetectionZones(current.withZones(zones), current) }
+                catch (e: TapoClient.ZoneSaveException) {
+                    Log.w("Zones opslaan ${dev().name}:\n${e.details}")
+                    json(ex, 400, JSONObject().put("error", e.message).put("details", e.details)); return
                 }
                 json(ex, 200, JSONObject().put("ok", true))
             }
