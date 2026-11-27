@@ -141,10 +141,14 @@ class DoorbellService : Service() {
                         if (e.type !in prefs.seenTypes) prefs.seenTypes = prefs.seenTypes + e.type
                         prefs.typeStats = nl.tapo.deurbel.core.EventTypes.record(prefs.typeStats, e.type, e.startTime + corr)
                     }
-                    if (primed && (prefs.ringTypes.isEmpty() || e.type in prefs.ringTypes)) notifyRing(d, e.startTime + corr, e.type)
+                    if (primed && (prefs.ringTypes.isEmpty() || e.type in prefs.ringTypes)) {
+                        Prefs(this).addHistory(e.startTime + corr, d.id, e.type)
+                        if (!Prefs(this).dndActive) notifyRing(d, e.startTime + corr, e.type)
+                    }
                 }
                 seen.entries.removeIf { it.value < camNow - 900 }
                 primed = true
+                Dnd.checkExpired(this)
                 val powerEvery = if (onBattery(d)) 30 * 60_000 else 5 * 60_000
                 if (System.currentTimeMillis() - lastPowerCheck > powerEvery) { lastPowerCheck = System.currentTimeMillis(); checkPower(d, c) }
                 devStatus[d.id] = "ok"

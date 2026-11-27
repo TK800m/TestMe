@@ -1,6 +1,18 @@
 package nl.tapo.deurbel.ui
 
 import androidx.compose.foundation.clickable
+import androidx.compose.foundation.layout.Box
+import androidx.compose.foundation.layout.size
+import androidx.compose.foundation.layout.width
+import androidx.compose.material.icons.filled.BatteryChargingFull
+import androidx.compose.material.icons.filled.BatteryFull
+import androidx.compose.material.icons.filled.CropFree
+import androidx.compose.material.icons.filled.Eco
+import androidx.compose.material.icons.filled.MusicNote
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.Sensors
+import androidx.compose.material.icons.filled.SystemUpdate
+import androidx.compose.material.icons.filled.Videocam
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Column
 import androidx.compose.foundation.layout.Row
@@ -91,44 +103,67 @@ fun DeviceScreen(devId: String, onBack: () -> Unit, onChanged: () -> Unit) {
         }
     }
 
-    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState()).padding(16.dp), verticalArrangement = Arrangement.spacedBy(10.dp)) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
+    androidx.activity.compose.BackHandler(onBack = onBack)
+    Column(Modifier.fillMaxSize().verticalScroll(rememberScrollState())) {
+        // ---- header ----
+        Row(Modifier.padding(start = 4.dp, end = 8.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
             IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Terug") }
-            Column(Modifier.weight(1f)) {
-                Text(d.name, style = MaterialTheme.typography.headlineSmall)
-                Text((if (d.isDoorbell) "Deurbel" else "Camera") + " · " + d.host, style = MaterialTheme.typography.bodySmall)
-            }
+            Spacer(Modifier.weight(1f))
             IconButton(onClick = { rename = true }) { Icon(Icons.Filled.Edit, "Naam wijzigen") }
         }
-        message?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
-
-        power?.let { p ->
-            Text("Voeding: " + if (p.hasBattery) p.label() else "netvoeding",
-                color = if (p.low) MaterialTheme.colorScheme.error else MaterialTheme.colorScheme.onBackground)
-        }
-
-        if (d.isDoorbell) Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) { Text("Gong"); Text("Belgeluid in huis", style = MaterialTheme.typography.bodySmall) }
-            Switch(checked = chime == true, enabled = chime != null, onCheckedChange = { on ->
-                run(if (on) "Gong staat aan" else "Gong staat uit", { it.setChimeEnabled(on) }) { chime = on }
-            })
-        }
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            Column(Modifier.weight(1f)) {
-                Text("Zuinig opnemen")
-                Text("Alleen opnemen als er iets gebeurt (minder stroom en opslag)", style = MaterialTheme.typography.bodySmall)
+        Row(Modifier.padding(horizontal = 20.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconTile(if (d.isDoorbell) Icons.Filled.NotificationsActive else Icons.Filled.Videocam, if (d.isDoorbell) Palette.Accent else Palette.Blue, 56)
+            Spacer(Modifier.width(16.dp))
+            Column {
+                Text(d.name, style = MaterialTheme.typography.headlineSmall)
+                Text((if (d.isDoorbell) "Deurbel" else "Camera") + " · " + d.host, style = MaterialTheme.typography.bodySmall,
+                    color = MaterialTheme.colorScheme.onSurfaceVariant)
             }
-            Switch(checked = eventsOnly == true, enabled = eventsOnly != null, onCheckedChange = { on ->
-                run(if (on) "Neemt alleen nog op bij gebeurtenissen" else "Neemt continu op", { it.setRecordEventsOnly(on) }) { eventsOnly = on }
-            })
         }
-        OutlinedButton(modifier = Modifier.fillMaxWidth(), onClick = { zones = true }) { Text("Detectiezones bewerken") }
+        message?.let { Text(it, Modifier.padding(horizontal = 20.dp, vertical = 8.dp), color = MaterialTheme.colorScheme.secondary) }
 
-        // ---- which events give a notification ----
-        HorizontalDivider()
-        Text("Waarvoor een melding?", style = MaterialTheme.typography.titleMedium)
+        // ---- device ----
+        SectionTitle("Apparaat")
+        GroupCard {
+            power?.let { p ->
+                SettingRow(if (p.charging == true) Icons.Filled.BatteryChargingFull else Icons.Filled.BatteryFull,
+                    if (p.low) Palette.Red else Palette.Green, "Voeding", if (p.hasBattery) p.label() else "Netvoeding",
+                    subtitleColor = if (p.low) MaterialTheme.colorScheme.error else null)
+            }
+            if (d.isDoorbell) ToggleRow(Icons.Filled.MusicNote, Palette.Violet, "Gong",
+                if (chime == null) "Wordt opgehaald…" else "Belgeluid in huis", chime == true, enabled = chime != null) { on ->
+                run(if (on) "Gong staat aan" else "Gong staat uit", { it.setChimeEnabled(on) }) { chime = on }
+            }
+            ToggleRow(Icons.Filled.Eco, Palette.Green, "Zuinig opnemen", "Alleen opnemen als er iets gebeurt",
+                eventsOnly == true, enabled = eventsOnly != null) { on ->
+                run(if (on) "Neemt alleen nog op bij gebeurtenissen" else "Neemt continu op", { it.setRecordEventsOnly(on) }) { eventsOnly = on }
+            }
+            SettingRow(Icons.Filled.CropFree, Palette.Blue, "Detectiezones", "Alleen in deze zones reageren", onClick = { zones = true })
+            SettingRow(Icons.Filled.SystemUpdate, Palette.Grey, "Software",
+                fwText ?: "Zoeken naar updates", divider = false, onClick = {
+                    if (fwBusy) return@SettingRow
+                    fwBusy = true; fwNew = null; fwText = "Zoeken naar updates…"
+                    scope.launch {
+                        fwText = try {
+                            withContext(Dispatchers.IO) {
+                                val c = Camera.client(ctx, devId)
+                                val current = c.deviceInfo().optString("sw_version").substringBefore(" ")
+                                val up = c.checkFirmware()
+                                if (TapoClient.firmwareAvailable(up, current)) {
+                                    fwNew = up.optString("version").substringBefore(" "); "Nieuwe versie $fwNew – tik om te installeren"
+                                } else "Up-to-date (versie $current)"
+                            }
+                        } catch (e: Exception) { "Zoeken lukte niet: ${Camera.friendly(e)}" }
+                        fwBusy = false
+                        if (fwNew != null) fwConfirm = true
+                    }
+                }) { if (fwBusy) androidx.compose.material3.CircularProgressIndicator(Modifier.size(20.dp), strokeWidth = 2.dp) else Chevron() }
+        }
+
+        // ---- notifications ----
+        SectionTitle("Waarvoor een melding?")
         if (d.isDoorbell) {
-            Button(modifier = Modifier.fillMaxWidth(), enabled = !learning, onClick = {
+            Button(modifier = Modifier.padding(horizontal = 16.dp).fillMaxWidth().height(52.dp), enabled = !learning, onClick = {
                 learning = true; learnText = "Loop nu naar de deur en druk één keer op de bel (je hebt 90 seconden)…"
                 scope.launch {
                     learnText = try {
@@ -155,31 +190,37 @@ fun DeviceScreen(devId: String, onBack: () -> Unit, onChanged: () -> Unit) {
                                 prefs.typeLabels = labels
                                 prefs.seenTypes = prefs.seenTypes + candidates
                                 prefs.ringTypes = setOf(ring)
-                                "Gelukt! Aanbellen is herkend. Je krijgt nu alleen een melding als er wordt aangebeld."
+                                "Gelukt! Je krijgt nu alleen een melding als er wordt aangebeld."
                             }
                         }
                     } catch (e: Exception) { "Herkennen lukte niet: ${Camera.friendly(e)}" }
                     ringTypes = prefs.ringTypes; typeLabels = prefs.typeLabels; learning = false
                 }
-            }) { Text(if (learning) "Bezig met luisteren…" else "Aanbellen herkennen") }
-            learnText?.let { Text(it, color = MaterialTheme.colorScheme.secondary) }
+            }) {
+                if (learning) { androidx.compose.material3.CircularProgressIndicator(Modifier.size(18.dp), strokeWidth = 2.dp, color = Palette.AccentInk); Spacer(Modifier.width(10.dp)) }
+                Text(if (learning) "Luisteren… druk nu op de bel" else "Aanbellen herkennen")
+            }
+            Text(learnText ?: "Druk één keer op de bel, dan weet de app welke gebeurtenis het aanbellen is.",
+                Modifier.padding(horizontal = 32.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall,
+                color = if (learnText != null) MaterialTheme.colorScheme.secondary else MaterialTheme.colorScheme.onSurfaceVariant)
         }
         val stats = remember(learning) { prefs.typeStats }
         val seen = (prefs.seenTypes + stats.keys().asSequence().toList()).sortedWith(
             compareBy({ if (typeLabels.optString(it) == "ring") 0 else 1 }, { -(stats.optJSONObject(it)?.optInt("n") ?: 0) }))
-        if (seen.isEmpty()) Text("Nog geen gebeurtenissen gezien.", style = MaterialTheme.typography.bodySmall)
-        else Text(if (ringTypes.isEmpty()) "Nu krijg je bij álle gebeurtenissen een melding. Vink aan waarvoor je er een wilt:"
-            else "Melding bij de aangevinkte gebeurtenissen. Tik op een naam om die te wijzigen.", style = MaterialTheme.typography.bodySmall)
-        seen.forEach { t ->
-            var menu by remember { mutableStateOf(false) }
-            Row(verticalAlignment = Alignment.CenterVertically) {
-                Checkbox(checked = t in ringTypes, onCheckedChange = { on ->
-                    ringTypes = if (on) ringTypes + t else ringTypes - t
-                    prefs.ringTypes = ringTypes
-                })
-                Column(Modifier.weight(1f).clickable { menu = true }.padding(vertical = 6.dp)) {
-                    Text(EventTypes.name(t, typeLabels), style = MaterialTheme.typography.bodyLarge)
-                    Text(EventTypes.describe(stats, t), style = MaterialTheme.typography.bodySmall)
+        GroupCard {
+            if (seen.isEmpty()) Text("Nog geen gebeurtenissen gezien.", Modifier.padding(20.dp), color = MaterialTheme.colorScheme.onSurfaceVariant)
+            seen.forEachIndexed { i, t ->
+                var menu by remember { mutableStateOf(false) }
+                val label = typeLabels.optString(t)
+                Box {
+                    ToggleRow(if (label == "ring") Icons.Filled.NotificationsActive else Icons.Filled.Sensors,
+                        if (label == "ring") Palette.Accent else Palette.Grey,
+                        EventTypes.name(t, typeLabels) + "  ✎", EventTypes.describe(stats, t), t in ringTypes, divider = i < seen.size - 1) { on ->
+                        ringTypes = if (on) ringTypes + t else ringTypes - t
+                        prefs.ringTypes = ringTypes
+                    }
+                    // tap on the name (left part) to rename
+                    Box(Modifier.matchParentSize().padding(end = 80.dp).clickable { menu = true })
                     DropdownMenu(expanded = menu, onDismissRequest = { menu = false }) {
                         EventTypes.LABELS.forEach { (key, name) ->
                             DropdownMenuItem(text = { Text(name) }, onClick = {
@@ -192,34 +233,14 @@ fun DeviceScreen(devId: String, onBack: () -> Unit, onChanged: () -> Unit) {
                 }
             }
         }
+        Text(if (seen.isEmpty()) "" else if (ringTypes.isEmpty()) "Nu krijg je bij álle gebeurtenissen een melding (ook beweging)."
+            else "Alleen wat aan staat geeft een melding. Tik op een naam om die te wijzigen.",
+            Modifier.padding(horizontal = 32.dp, vertical = 8.dp), style = MaterialTheme.typography.bodySmall, color = MaterialTheme.colorScheme.onSurfaceVariant)
 
-        // ---- software ----
-        HorizontalDivider()
-        Text("Software", style = MaterialTheme.typography.titleMedium)
-        OutlinedButton(modifier = Modifier.fillMaxWidth(), enabled = !fwBusy, onClick = {
-            fwBusy = true; fwNew = null; fwText = "Zoeken naar updates…"
-            scope.launch {
-                fwText = try {
-                    withContext(Dispatchers.IO) {
-                        val c = Camera.client(ctx, devId)
-                        val current = c.deviceInfo().optString("sw_version")
-                        val up = c.checkFirmware()
-                        if (TapoClient.firmwareAvailable(up, current)) {
-                            fwNew = up.optString("version")
-                            "Nieuwe versie ${up.optString("version")} beschikbaar (nu: $current)." +
-                                up.optString("release_note").let { if (it.isBlank()) "" else "\n\n$it" }
-                        } else "Up-to-date (versie $current)."
-                    }
-                } catch (e: Exception) { "Zoeken lukte niet: ${Camera.friendly(e)}" }
-                fwBusy = false
-            }
-        }) { Text(if (fwBusy) "Bezig…" else "Zoeken naar updates") }
-        fwText?.let { Text(it, style = MaterialTheme.typography.bodySmall) }
-        if (fwNew != null) Button(modifier = Modifier.fillMaxWidth(), onClick = { fwConfirm = true }) { Text("Nu installeren") }
-
-        HorizontalDivider()
-        TextButton(onClick = { confirmRemove = true }) { Text("Apparaat verwijderen uit de app", color = MaterialTheme.colorScheme.error) }
-        Spacer(Modifier.height(32.dp))
+        TextButton(onClick = { confirmRemove = true }, modifier = Modifier.padding(16.dp).fillMaxWidth()) {
+            Text("Apparaat verwijderen uit de app", color = MaterialTheme.colorScheme.error)
+        }
+        Spacer(Modifier.height(24.dp))
     }
 
     if (rename) {

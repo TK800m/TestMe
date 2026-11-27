@@ -8,33 +8,40 @@ import androidx.activity.ComponentActivity
 import androidx.activity.SystemBarStyle
 import androidx.activity.compose.setContent
 import androidx.activity.enableEdgeToEdge
-import androidx.compose.foundation.isSystemInDarkTheme
-import androidx.compose.material3.Surface
-import androidx.compose.material3.lightColorScheme
-import androidx.compose.runtime.LaunchedEffect
-import androidx.compose.runtime.mutableStateOf
 import androidx.activity.result.contract.ActivityResultContracts
+import androidx.compose.animation.Crossfade
+import androidx.compose.foundation.isSystemInDarkTheme
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.fillMaxSize
 import androidx.compose.foundation.layout.padding
 import androidx.compose.material.icons.Icons
-import androidx.compose.material.icons.filled.ChatBubble
 import androidx.compose.material.icons.filled.Settings
 import androidx.compose.material.icons.filled.VideoLibrary
 import androidx.compose.material.icons.filled.Videocam
+import androidx.compose.material.icons.outlined.Settings
+import androidx.compose.material.icons.outlined.VideoLibrary
+import androidx.compose.material.icons.outlined.Videocam
 import androidx.compose.material3.Icon
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.NavigationBar
 import androidx.compose.material3.NavigationBarItem
+import androidx.compose.material3.NavigationBarItemDefaults
 import androidx.compose.material3.Scaffold
+import androidx.compose.material3.SnackbarHost
+import androidx.compose.material3.SnackbarHostState
 import androidx.compose.material3.Text
-import androidx.compose.material3.darkColorScheme
 import androidx.compose.runtime.Composable
+import androidx.compose.runtime.CompositionLocalProvider
+import androidx.compose.runtime.LaunchedEffect
 import androidx.compose.runtime.getValue
+import androidx.compose.runtime.key
 import androidx.compose.runtime.mutableIntStateOf
+import androidx.compose.runtime.mutableStateOf
+import androidx.compose.runtime.remember
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Modifier
-import androidx.compose.ui.graphics.Color
+import androidx.compose.ui.text.font.FontWeight
+import nl.tapo.deurbel.Clips
 import nl.tapo.deurbel.DoorbellService
 import nl.tapo.deurbel.Prefs
 
@@ -50,8 +57,8 @@ class MainActivity : ComponentActivity() {
         val prefs = Prefs(this)
         themeMode = prefs.theme
         devId = prefs.currentId
-        nl.tapo.deurbel.Clips.cleanup(this)
-        tab = if (prefs.configured) 0 else 3
+        Clips.cleanup(this)
+        tab = if (prefs.configured) TAB_LIVE else TAB_SETTINGS
         handle(intent)
         if (Build.VERSION.SDK_INT >= 33) notifPermission.launch(Manifest.permission.POST_NOTIFICATIONS)
         DoorbellService.sync(this)
@@ -65,7 +72,7 @@ class MainActivity : ComponentActivity() {
 
     private fun handle(i: Intent?) {
         i?.getStringExtra(EXTRA_DEV)?.let { selectDevice(it) }
-        if (i?.getBooleanExtra(EXTRA_RING, false) == true && Prefs(this).configured) tab = 0
+        if (i?.getBooleanExtra(EXTRA_RING, false) == true && Prefs(this).configured) tab = TAB_LIVE
     }
 
     private fun selectDevice(id: String) {
@@ -83,46 +90,64 @@ class MainActivity : ComponentActivity() {
                 navigationBarStyle = if (dark) SystemBarStyle.dark(transparent) else SystemBarStyle.light(transparent, transparent),
             )
         }
-        val colors = if (dark) darkColorScheme(
-            primary = Color(0xFFF5A524), onPrimary = Color(0xFF1A1203),
-            secondary = Color(0xFF7FB3E6), background = Color(0xFF0B0D10), surface = Color(0xFF0B0D10),
-            surfaceContainer = Color(0xFF15181D), surfaceVariant = Color(0xFF1E2228),
-        ) else lightColorScheme(
-            primary = Color(0xFFB45F00), onPrimary = Color.White,
-            secondary = Color(0xFF1F5FA8), background = Color(0xFFF2F3F5), surface = Color(0xFFF2F3F5),
-            surfaceContainer = Color.White, surfaceVariant = Color(0xFFE6E8EC),
-        )
-        MaterialTheme(colorScheme = colors) { Surface(color = MaterialTheme.colorScheme.background) {
-            Scaffold(bottomBar = {
-                NavigationBar {
-                    listOf(
-                        Triple("Live", Icons.Filled.Videocam, 0),
-                        Triple("Opnames", Icons.Filled.VideoLibrary, 1),
-                        Triple("Antwoorden", Icons.Filled.ChatBubble, 2),
-                        Triple("Instellingen", Icons.Filled.Settings, 3),
-                    ).forEach { (label, icon, i) ->
-                        NavigationBarItem(selected = tab == i, onClick = { tab = i },
-                            icon = { Icon(icon, contentDescription = label) }, label = { Text(label) })
+        val snackbar = remember { SnackbarHostState() }
+        val haptic = rememberHaptic()
+        MaterialTheme(colorScheme = appColors(dark), typography = AppTypography) {
+            CompositionLocalProvider(LocalSnackbar provides snackbar) {
+                Scaffold(
+                    containerColor = MaterialTheme.colorScheme.background,
+                    snackbarHost = { SnackbarHost(snackbar) },
+                    bottomBar = {
+                        NavigationBar(containerColor = MaterialTheme.colorScheme.surfaceContainer) {
+                            listOf(
+                                Tab("Live", Icons.Filled.Videocam, Icons.Outlined.Videocam, TAB_LIVE),
+                                Tab("Opnames", Icons.Filled.VideoLibrary, Icons.Outlined.VideoLibrary, TAB_CLIPS),
+                                Tab("Instellingen", Icons.Filled.Settings, Icons.Outlined.Settings, TAB_SETTINGS),
+                            ).forEach { t ->
+                                val on = tab == t.index
+                                NavigationBarItem(
+                                    selected = on, onClick = { if (!on) { haptic(false); tab = t.index } },
+                                    icon = { Icon(if (on) t.selected else t.icon, contentDescription = null) },
+                                    label = { Text(t.label, fontWeight = if (on) FontWeight.SemiBold else FontWeight.Normal) },
+                                    colors = NavigationBarItemDefaults.colors(
+                                        selectedIconColor = Palette.AccentInk, indicatorColor = Palette.Accent,
+                                        selectedTextColor = MaterialTheme.colorScheme.onSurface,
+                                        unselectedIconColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                        unselectedTextColor = MaterialTheme.colorScheme.onSurfaceVariant,
+                                    ),
+                                )
+                            }
+                        }
+                    },
+                ) { pad ->
+                    Box(Modifier.fillMaxSize().padding(pad)) {
+                        Crossfade(tab, label = "tab") { current ->
+                            // everything below is rebuilt when another device is chosen
+                            key(devId) {
+                                when (current) {
+                                    TAB_LIVE -> LiveScreen(onSelectDevice = ::selectDevice, onOpenClips = { tab = TAB_CLIPS },
+                                        onOpenSettings = { tab = TAB_SETTINGS })
+                                    TAB_CLIPS -> ClipsScreen(onSelectDevice = ::selectDevice)
+                                    else -> SettingsScreen(onSaved = { tab = TAB_LIVE }, theme = themeMode,
+                                        onTheme = { themeMode = it; Prefs(this@MainActivity).theme = it },
+                                        onDevicesChanged = { devId = Prefs(this@MainActivity).currentId })
+                                }
+                            }
+                        }
                     }
                 }
-            }) { pad ->
-                Box(Modifier.fillMaxSize().padding(pad)) {
-                    // everything below is rebuilt when another device is chosen
-                    androidx.compose.runtime.key(devId) { when (tab) {
-                        0 -> LiveScreen(onSelectDevice = ::selectDevice)
-                        1 -> ClipsScreen(onSelectDevice = ::selectDevice)
-                        2 -> ResponsesScreen()
-                        else -> SettingsScreen(onSaved = { tab = 0 }, theme = themeMode,
-                            onTheme = { themeMode = it; Prefs(this@MainActivity).theme = it },
-                            onDevicesChanged = { devId = Prefs(this@MainActivity).currentId })
-                    } }
-                }
             }
-        } }
+        }
     }
+
+    private data class Tab(val label: String, val selected: androidx.compose.ui.graphics.vector.ImageVector,
+                           val icon: androidx.compose.ui.graphics.vector.ImageVector, val index: Int)
 
     companion object {
         const val EXTRA_RING = "ring"
         const val EXTRA_DEV = "dev"
+        private const val TAB_LIVE = 0
+        private const val TAB_CLIPS = 1
+        private const val TAB_SETTINGS = 2
     }
 }

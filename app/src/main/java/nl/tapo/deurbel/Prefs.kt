@@ -133,6 +133,24 @@ class Prefs(context: Context, private val devId: String? = null) {
         get() = sp.getString("auto_update_time", "01:00") ?: "01:00"
         set(v) = sp.edit().putString("auto_update_time", v).apply()
 
+    /** "Niet storen" until this moment (ms); 0 = off. */
+    var dndUntil: Long
+        get() = sp.getLong("dnd_until", 0)
+        set(v) = sp.edit().putLong("dnd_until", v).apply()
+    val dndActive get() = dndUntil > System.currentTimeMillis()
+
+    /** Last events that gave a notification: [{"t":epochSec,"dev":"d1","type":"10"}]. */
+    var history: JSONArray
+        get() = JSONArray(sp.getString("history", "[]") ?: "[]")
+        set(v) = sp.edit().putString("history", v.toString()).apply()
+
+    fun addHistory(epochSec: Long, dev: String, type: String) {
+        val a = history
+        a.put(JSONObject().put("t", epochSec).put("dev", dev).put("type", type))
+        while (a.length() > 30) a.remove(0)
+        history = a
+    }
+
     val configured get() = password.isNotBlank() && devices.isNotEmpty()
 }
 

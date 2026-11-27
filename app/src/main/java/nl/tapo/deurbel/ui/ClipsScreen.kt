@@ -3,8 +3,8 @@
 package nl.tapo.deurbel.ui
 
 import android.view.ViewGroup
+import androidx.activity.compose.BackHandler
 import androidx.compose.foundation.background
-import androidx.compose.foundation.clickable
 import androidx.compose.foundation.layout.Arrangement
 import androidx.compose.foundation.layout.Box
 import androidx.compose.foundation.layout.Column
@@ -16,25 +16,25 @@ import androidx.compose.foundation.layout.height
 import androidx.compose.foundation.layout.padding
 import androidx.compose.foundation.layout.width
 import androidx.compose.foundation.lazy.LazyColumn
-import androidx.compose.foundation.lazy.LazyRow
 import androidx.compose.foundation.lazy.items
+import androidx.compose.foundation.shape.CircleShape
+import androidx.compose.foundation.shape.RoundedCornerShape
 import androidx.compose.material.icons.Icons
 import androidx.compose.material.icons.automirrored.filled.ArrowBack
 import androidx.compose.material.icons.filled.Delete
 import androidx.compose.material.icons.filled.Download
-import androidx.compose.material.icons.filled.PlayCircle
-import androidx.compose.material.icons.filled.Refresh
-import androidx.compose.material3.AlertDialog
+import androidx.compose.material.icons.filled.NotificationsActive
+import androidx.compose.material.icons.filled.PlayArrow
+import androidx.compose.material.icons.filled.SdCard
 import androidx.compose.material3.Button
-import androidx.compose.material3.FilterChip
-import androidx.compose.material3.HorizontalDivider
 import androidx.compose.material3.Icon
 import androidx.compose.material3.IconButton
 import androidx.compose.material3.LinearProgressIndicator
 import androidx.compose.material3.MaterialTheme
 import androidx.compose.material3.OutlinedButton
+import androidx.compose.material3.SnackbarDuration
+import androidx.compose.material3.SnackbarResult
 import androidx.compose.material3.Text
-import androidx.compose.material3.TextButton
 import androidx.compose.runtime.Composable
 import androidx.compose.runtime.DisposableEffect
 import androidx.compose.runtime.LaunchedEffect
@@ -42,14 +42,17 @@ import androidx.compose.runtime.getValue
 import androidx.compose.runtime.mutableFloatStateOf
 import androidx.compose.runtime.mutableIntStateOf
 import androidx.compose.runtime.mutableLongStateOf
+import androidx.compose.runtime.mutableStateListOf
 import androidx.compose.runtime.mutableStateOf
 import androidx.compose.runtime.remember
 import androidx.compose.runtime.rememberCoroutineScope
 import androidx.compose.runtime.setValue
 import androidx.compose.ui.Alignment
 import androidx.compose.ui.Modifier
+import androidx.compose.ui.draw.clip
 import androidx.compose.ui.graphics.Color
 import androidx.compose.ui.platform.LocalContext
+import androidx.compose.ui.text.font.FontWeight
 import androidx.compose.ui.text.style.TextAlign
 import androidx.compose.ui.unit.dp
 import androidx.compose.ui.viewinterop.AndroidView
@@ -62,164 +65,177 @@ import nl.tapo.deurbel.Clips
 import nl.tapo.deurbel.Prefs
 import nl.tapo.deurbel.core.Recording
 import java.io.File
-import java.text.SimpleDateFormat
-import java.util.Date
-import java.util.Locale
 
-private val nl = Locale("nl", "NL")
+private data class Clip(val rec: Recording, val day: String, val rang: Boolean)
 
 @Composable
 fun ClipsScreen(onSelectDevice: (String) -> Unit = {}) {
     val ctx = LocalContext.current
-    if (!Prefs(ctx).configured) {
-        Box(Modifier.fillMaxSize(), contentAlignment = Alignment.Center) { Text("Stel eerst de deurbel in via Instellingen.") }
+    val scope = rememberCoroutineScope()
+    val snackbar = LocalSnackbar.current
+    val haptic = rememberHaptic()
+    val prefs = remember { Prefs(ctx) }
+    if (!prefs.configured) {
+        EmptyState(Icons.Filled.SdCard, "Nog geen apparaat", "Koppel eerst je deurbel of camera in Instellingen.")
         return
     }
     var days by remember { mutableStateOf<List<String>>(emptyList()) }
-    var selected by remember { mutableStateOf<String?>(null) }
-    var clips by remember { mutableStateOf<List<Recording>>(emptyList()) }
+    var shownDays by remember { mutableIntStateOf(0) }
+    val clips = remember { mutableStateListOf<Clip>() }
     var corr by remember { mutableLongStateOf(0L) }
     var loading by remember { mutableStateOf(true) }
     var error by remember { mutableStateOf<String?>(null) }
-    var open by remember { mutableStateOf<Recording?>(null) }
+    var filter by remember { mutableStateOf("all") }
+    var open by remember { mutableStateOf<Clip?>(null) }
     var reload by remember { mutableIntStateOf(0) }
 
-    LaunchedEffect(reload) {
-        loading = true; error = null
+    // which clips had a doorbell press (from the notification history)
+    fun rang(r: Recording): Boolean {
+        if (prefs.ringTypes.isEmpty()) return false
+        val h = prefs.history
+        val start = r.startTime + corr; val end = r.endTime + corr
+        return (0 until h.length()).map { h.getJSONObject(it) }.any {
+            it.optString("dev") == prefs.currentId && it.optLong("t") in (start - 10)..(end + 10) && it.optString("type") in prefs.ringTypes
+        }
+    }
+
+    suspend fun loadMore() {
+        loading = true
         try {
-            corr = Clips.timeCorrection(ctx)
-            days = Clips.days(ctx)
-            if (selected == null || selected !in days) selected = days.firstOrNull()
+            days.drop(shownDays).take(3).forEach { d ->
+                clips.addAll(Clips.recordings(ctx, d).map { Clip(it, d, false) }.map { it.copy(rang = rang(it.rec)) })
+                shownDays++
+            }
         } catch (e: Exception) { error = Camera.friendly(e) }
         loading = false
     }
-    LaunchedEffect(selected, reload) {
-        val d = selected ?: return@LaunchedEffect
-        loading = true
-        try { clips = Clips.recordings(ctx, d) } catch (e: Exception) { error = Camera.friendly(e) }
-        loading = false
+
+    LaunchedEffect(reload) {
+        loading = true; error = null; clips.clear(); shownDays = 0
+        try { corr = Clips.timeCorrection(ctx); days = Clips.days(ctx); loadMore() }
+        catch (e: Exception) { error = Camera.friendly(e); loading = false }
     }
 
-    open?.let { rec ->
-        ClipPlayer(rec, corr, onBack = { open = null }, onDeleted = { open = null; clips = clips.filter { it != rec } })
+    open?.let { c ->
+        ClipViewer(c.rec, corr, c.rang, onBack = { open = null }, onDelete = {
+            open = null
+            val index = clips.indexOf(c); clips.remove(c)
+            scope.launch {
+                val r = snackbar.showSnackbar("Opname verwijderd", actionLabel = "Ongedaan maken", duration = SnackbarDuration.Short)
+                if (r == SnackbarResult.ActionPerformed) clips.add(index.coerceAtMost(clips.size), c) else Clips.delete(ctx, c.rec)
+            }
+        })
         return
     }
 
-    Column(Modifier.fillMaxSize()) {
-        DeviceChips(onSelectDevice)
-        Row(Modifier.fillMaxWidth().padding(start = 16.dp, end = 4.dp, top = 8.dp), verticalAlignment = Alignment.CenterVertically) {
-            Text("Opnames van ${Prefs(ctx).device?.name ?: "het apparaat"}", style = MaterialTheme.typography.titleMedium, modifier = Modifier.weight(1f))
-            IconButton(onClick = { reload++ }) { Icon(Icons.Filled.Refresh, "Vernieuwen") }
-        }
-        LazyRow(Modifier.padding(horizontal = 12.dp), horizontalArrangement = Arrangement.spacedBy(8.dp)) {
-            items(days) { d ->
-                FilterChip(selected = d == selected, onClick = { selected = d }, label = { Text(dayLabel(d)) })
+    val visible = clips.filter { filter == "all" || it.rang }
+    LazyColumn(Modifier.fillMaxSize()) {
+        item {
+            DeviceSwitch(onSelectDevice)
+            ScreenTitle("Opnames") {
+                Segmented(listOf("all" to "Alles", "rang" to "Aangebeld"), filter, Modifier.width(190.dp)) { filter = it }
             }
         }
-        if (loading) LinearProgressIndicator(Modifier.fillMaxWidth().padding(top = 8.dp))
-        error?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.error) }
-        if (!loading && error == null && clips.isEmpty()) {
-            Text("Geen opnames gevonden. Zit er een micro-SD-kaart in het apparaat en staat opnemen aan?",
-                Modifier.padding(16.dp), textAlign = TextAlign.Center)
+        if (error != null && clips.isEmpty()) item {
+            EmptyState(Icons.Filled.SdCard, "Opnames niet bereikbaar", error!!) { Button(onClick = { reload++ }) { Text("Opnieuw proberen") } }
+        } else if (!loading && visible.isEmpty()) item {
+            EmptyState(Icons.Filled.SdCard,
+                if (filter == "rang") "Niemand aangebeld" else "Nog geen opnames",
+                if (filter == "rang") "Hier verschijnen opnames waarbij is aangebeld." else "Zit er een micro-SD-kaart in het apparaat en staat opnemen aan?")
         }
-        LazyColumn(Modifier.fillMaxSize()) {
-            items(clips, key = { it.startTime }) { r ->
-                Row(Modifier.fillMaxWidth().clickable { open = r }.padding(horizontal = 16.dp, vertical = 12.dp),
-                    verticalAlignment = Alignment.CenterVertically) {
-                    Icon(Icons.Filled.PlayCircle, null, tint = MaterialTheme.colorScheme.primary)
-                    Spacer(Modifier.width(12.dp))
-                    Column(Modifier.weight(1f)) {
-                        Text(time(r.startTime + corr), style = MaterialTheme.typography.titleMedium)
-                        Text("Duur ${duration(r.endTime - r.startTime)}", style = MaterialTheme.typography.bodySmall)
+        visible.groupBy { it.day }.forEach { (day, list) ->
+            item(key = "h$day") {
+                Text(dayLabel(list.first().rec.startTime + corr), style = MaterialTheme.typography.titleMedium,
+                    modifier = Modifier.padding(start = 20.dp, top = 22.dp, bottom = 8.dp))
+            }
+            item(key = "c$day") {
+                GroupCard {
+                    list.forEachIndexed { i, c ->
+                        val dur = c.rec.endTime - c.rec.startTime
+                        SettingRow(if (c.rang) Icons.Filled.NotificationsActive else Icons.Filled.PlayArrow,
+                            if (c.rang) Palette.Accent else Palette.Grey,
+                            hhmm(c.rec.startTime + corr),
+                            (if (dur >= 60) "${dur / 60}:${"%02d".format(dur % 60)} min" else "$dur sec") + if (c.rang) " · aangebeld" else "",
+                            divider = i < list.size - 1, onClick = { haptic(false); open = c })
                     }
-                    if (Clips.cached(ctx, r) != null) Icon(Icons.Filled.Download, "Al gedownload", tint = Color.Gray)
                 }
-                HorizontalDivider()
             }
         }
+        if (loading) item {
+            Column(Modifier.padding(16.dp), verticalArrangement = Arrangement.spacedBy(12.dp)) {
+                repeat(3) { Box(Modifier.fillMaxWidth().height(64.dp).clip(RoundedCornerShape(18.dp)).background(MaterialTheme.colorScheme.surfaceContainer)) }
+            }
+        } else if (shownDays < days.size) item {
+            OutlinedButton(onClick = { scope.launch { loadMore() } }, modifier = Modifier.fillMaxWidth().padding(16.dp)) { Text("Oudere opnames laden") }
+        }
+        item { Spacer(Modifier.height(24.dp)) }
     }
 }
 
 @Composable
-private fun ClipPlayer(rec: Recording, corr: Long, onBack: () -> Unit, onDeleted: () -> Unit) {
+private fun ClipViewer(rec: Recording, corr: Long, rang: Boolean, onBack: () -> Unit, onDelete: () -> Unit) {
     val ctx = LocalContext.current
     val scope = rememberCoroutineScope()
+    val snackbar = LocalSnackbar.current
+    val haptic = rememberHaptic()
     var file by remember { mutableStateOf<File?>(null) }
     var progress by remember { mutableFloatStateOf(0f) }
     var error by remember { mutableStateOf<String?>(null) }
-    var info by remember { mutableStateOf<String?>(null) }
-    var confirmDelete by remember { mutableStateOf(false) }
     var attempt by remember { mutableIntStateOf(0) }
+    BackHandler(onBack = onBack)
 
     LaunchedEffect(attempt) {
         error = null
         try { file = Clips.prepare(ctx, rec) { progress = it } } catch (e: Exception) { error = "Ophalen mislukt: ${Camera.friendly(e)}" }
     }
 
-    Column(Modifier.fillMaxSize()) {
-        Row(verticalAlignment = Alignment.CenterVertically) {
-            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Terug") }
-            Text("${day(rec.startTime + corr)} ${time(rec.startTime + corr)}", style = MaterialTheme.typography.titleMedium)
+    Column(Modifier.fillMaxSize().background(Color.Black)) {
+        Row(Modifier.padding(8.dp), verticalAlignment = Alignment.CenterVertically) {
+            IconButton(onClick = onBack) { Icon(Icons.AutoMirrored.Filled.ArrowBack, "Terug", tint = Color.White) }
+            Column {
+                Text("${dayLabel(rec.startTime + corr)} · ${hhmm(rec.startTime + corr)}", color = Color.White, fontWeight = FontWeight.Bold)
+                Text((if (rang) "Aangebeld · " else "") + "${rec.endTime - rec.startTime} sec", color = Color(0xFF9AA1AB),
+                    style = MaterialTheme.typography.bodySmall)
+            }
         }
-        Box(Modifier.fillMaxWidth().height(320.dp).background(Color.Black), contentAlignment = Alignment.Center) {
+        Box(Modifier.weight(1f).fillMaxWidth(), contentAlignment = Alignment.Center) {
             val f = file
-            if (f != null) {
-                val player = remember(f) {
-                    ExoPlayer.Builder(ctx).build().apply {
-                        setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(f))); prepare(); playWhenReady = true
+            when {
+                f != null -> {
+                    val player = remember(f) {
+                        ExoPlayer.Builder(ctx).build().apply { setMediaItem(MediaItem.fromUri(android.net.Uri.fromFile(f))); prepare(); playWhenReady = true }
                     }
+                    DisposableEffect(player) { onDispose { player.release() } }
+                    AndroidView(factory = { c ->
+                        PlayerView(c).apply {
+                            layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
+                            this.player = player
+                        }
+                    }, modifier = Modifier.fillMaxSize())
                 }
-                DisposableEffect(player) { onDispose { player.release() } }
-                AndroidView(factory = { c ->
-                    PlayerView(c).apply {
-                        layoutParams = ViewGroup.LayoutParams(ViewGroup.LayoutParams.MATCH_PARENT, ViewGroup.LayoutParams.MATCH_PARENT)
-                        this.player = player
-                    }
-                }, modifier = Modifier.fillMaxSize())
-            } else if (error != null) {
-                Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(16.dp)) {
+                error != null -> Column(horizontalAlignment = Alignment.CenterHorizontally, modifier = Modifier.padding(24.dp)) {
                     Text(error!!, color = Color.White, textAlign = TextAlign.Center)
-                    Button(onClick = { attempt++ }) { Text("Opnieuw") }
+                    Spacer(Modifier.height(10.dp))
+                    Button(onClick = { attempt++ }) { Text("Opnieuw proberen") }
                 }
-            } else {
-                Column(horizontalAlignment = Alignment.CenterHorizontally) {
-                    Text("Opname ophalen van de deurbel…", color = Color.White)
-                    Spacer(Modifier.height(8.dp))
-                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.width(200.dp))
+                else -> Column(horizontalAlignment = Alignment.CenterHorizontally) {
+                    Text("Opname ophalen…", color = Color.White)
+                    Spacer(Modifier.height(10.dp))
+                    LinearProgressIndicator(progress = { progress }, modifier = Modifier.width(220.dp).clip(CircleShape),
+                        color = Palette.Accent, trackColor = Color.White.copy(alpha = 0.15f))
+                    Text("${(progress * 100).toInt()}%", color = Color(0xFF9AA1AB), modifier = Modifier.padding(top = 6.dp))
                 }
             }
         }
-        Row(Modifier.fillMaxWidth().padding(16.dp), horizontalArrangement = Arrangement.spacedBy(12.dp)) {
-            Button(enabled = file != null, onClick = {
+        Row(Modifier.fillMaxWidth().padding(vertical = 22.dp), horizontalArrangement = Arrangement.SpaceEvenly) {
+            BigAction(Icons.Filled.Download, "Bewaren") {
+                val f = file ?: return@BigAction
+                haptic(true)
                 scope.launch {
-                    info = try { Clips.export(ctx, rec, file!!, corr); "Opgeslagen in Video's › Deurbel" }
-                    catch (e: Exception) { "Opslaan mislukt: ${e.message}" }
+                    snackbar.showSnackbar(try { Clips.export(ctx, rec, f, corr); "Opgeslagen in Video's › Deurbel" } catch (e: Exception) { "Opslaan mislukt: ${e.message}" })
                 }
-            }) { Icon(Icons.Filled.Download, null); Spacer(Modifier.width(6.dp)); Text("Downloaden") }
-            OutlinedButton(onClick = { confirmDelete = true }) {
-                Icon(Icons.Filled.Delete, null); Spacer(Modifier.width(6.dp)); Text("Verwijderen")
             }
+            BigAction(Icons.Filled.Delete, "Verwijderen") { haptic(true); onDelete() }
         }
-        if (file?.extension == "ts") {
-            Text("Let op: deze opname kon niet naar MP4 worden omgezet en is opgeslagen als .ts (afspelen met bijv. VLC).",
-                Modifier.padding(horizontal = 16.dp), style = MaterialTheme.typography.bodySmall)
-        }
-        info?.let { Text(it, Modifier.padding(16.dp), color = MaterialTheme.colorScheme.secondary) }
-    }
-
-    if (confirmDelete) {
-        AlertDialog(onDismissRequest = { confirmDelete = false },
-            title = { Text("Opname verwijderen?") },
-            text = { Text("De opname verdwijnt uit de app en van deze telefoon. Losse opnames van de SD-kaart wissen kan via de lokale verbinding niet; de deurbel overschrijft oude opnames vanzelf als de kaart vol is.") },
-            confirmButton = { TextButton(onClick = { Clips.delete(ctx, rec); confirmDelete = false; onDeleted() }) { Text("Verwijderen") } },
-            dismissButton = { TextButton(onClick = { confirmDelete = false }) { Text("Annuleren") } })
     }
 }
-
-private fun dayLabel(d: String): String = try {
-    SimpleDateFormat("EEE d MMM", nl).format(SimpleDateFormat("yyyyMMdd", Locale.US).parse(d)!!)
-} catch (_: Exception) { d }
-
-private fun time(sec: Long) = SimpleDateFormat("HH:mm:ss", nl).format(Date(sec * 1000))
-private fun day(sec: Long) = SimpleDateFormat("EEE d MMM", nl).format(Date(sec * 1000))
-private fun duration(s: Long) = if (s >= 60) "${s / 60}:${"%02d".format(s % 60)}" else "${s}s"
