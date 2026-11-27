@@ -7,7 +7,6 @@ import android.content.pm.PackageManager
 import android.view.ViewGroup
 import androidx.activity.compose.rememberLauncherForActivityResult
 import androidx.activity.result.contract.ActivityResultContracts
-import androidx.compose.animation.AnimatedVisibility
 import androidx.compose.animation.core.LinearEasing
 import androidx.compose.animation.core.RepeatMode
 import androidx.compose.animation.core.animateFloat
@@ -214,7 +213,7 @@ fun LiveScreen(onSelectDevice: (String) -> Unit = {}, onOpenClips: () -> Unit = 
                 }
                 LiveState.Live -> {}
             }
-            AnimatedVisibility(talking, Modifier.align(Alignment.BottomCenter).padding(14.dp)) {
+            if (talking) Box(Modifier.align(Alignment.BottomCenter).padding(14.dp)) {
                 Pill(color = Palette.Red) {
                     SoundBars()
                     Text("Je praat via ${dev?.name ?: "de deurbel"}", color = Color.White, fontWeight = FontWeight.SemiBold)
